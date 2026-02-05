@@ -1,0 +1,54 @@
+tspipe:
+  train:
+    deferred_batch_norm: False
+    save_model_every_iter: 100
+
+  model_split: 
+    # 3GPU
+    #online: [19, 19, 19]   # 57 = 19+19+19  (student = resnet152)
+    #target: [10, 10, 10]   # 30 = 10+10+10  (teacher = vit_large)
+
+    # 4GPU
+    #target: [8, 4, 4, 14] # Default
+    #online: [7, 8, 16, 26]
+
+    # deit 모델 test 용
+    target: [4, 4, 4, 5]    # DeiT-Base (17)
+    online: [7, 8, 16, 26]  # ResNet-152 (57)
+
+    # target: [8, 8, 7, 7] #임의로 만든 baseline용 균등분할
+    # online: [15, 14, 14, 14]
+
+    # target: [9, 6, 6, 9] # batch 8 (new 실험)
+    # online: [15, 13, 14, 15]
+
+    # target: [9, 6, 6, 9] # batch 16 (new 실험)
+    # online: [14, 13, 14, 16]
+
+    # target: [9, 6, 6, 9] # batch 32 (new 실험)
+    # online: [12, 13, 15, 17]
+
+    # target: [9, 6, 6, 9] # batch 64 (new 실험)
+    # online: [9, 12, 17, 19]
+
+    # target: [9, 6, 6, 9] # batch 128 (new 실험)
+    # online: [9, 12, 16, 20]
+
+    # target: [9, 6, 6, 9] # batch 256
+    # online: [10, 11, 16, 20]
+
+    # target: [9, 6, 6, 9] # batch 512
+    # online: [9, 11, 16, 21]
+  
+  optimizer:
+    skip_optimizer: False
+    num_skip_initial_staleness: 0
+    gradient_accumulation: 1
+    reduce_verbose: False
+
+  gpipe_emulation:
+    enabled: False
+    num_ubatch: 1
+
+  async_param_update_emulation:
+    enabled: False
