@@ -3,13 +3,16 @@ from __future__ import absolute_import, division, print_function
 import torch.cuda.nvtx as nvtx
 
 import argparse
+import json
 import logging
 import os
 import random
 import sys
 import time
+import yaml
 from functools import partial
 from itertools import chain
+from pathlib import Path
 from typing import Iterable, Optional
 
 import numpy as np
@@ -24,6 +27,9 @@ from kd_losses import Logits, SoftTarget
 from models.factory import create_model
 from tspipe import TSPipe
 from tspipe.tspipe import TSPipeMode
+from tspipe.slowdown_detector import SlowdownDetector  # NEW: Slowdown monitoring
+from planner.mathematical_optimizer import MathematicalFailoverOptimizer  # NEW: Math-based policy
+from planner.stage_time_predictor import PartitionConfig
 from utils import (AverageMeter, accuracy, count_parameters,
                    count_parameters_in_MB, create_exp_dir,
                    load_pretrained_model, save_checkpoint)
@@ -75,6 +81,8 @@ parser.add_argument('--w_irg_tran', type=float, default=5.0, help='weight for IR
 parser.add_argument('--sf', type=float, default=1.0, help='scale factor for VID, i.e. mid_channels = sf * out_channels')
 parser.add_argument('--init_var', type=float, default=5.0, help='initial variance for VID')
 parser.add_argument('--att_f', type=float, default=1.0, help='attention factor of mid_channels for AFD')
+parser.add_argument('--dryrun-failover-cycle', action='store_true', default=False,
+                    help='Run deterministic failover restart/resume dry-run without real training data')
 
 
 args, unparsed = parser.parse_known_args()
@@ -99,14 +107,201 @@ np.random.seed(random_seed)
 random.seed(random_seed)
 
 
+def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
+    """Read option value from parse_known_args() leftovers."""
+    for idx, token in enumerate(unparsed_args):
+        if token == name and idx + 1 < len(unparsed_args):
+            return unparsed_args[idx + 1]
+        prefix = f"{name}="
+        if token.startswith(prefix):
+            return token[len(prefix):]
+    return None
+
+
+def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict):
+    """Overwrite tspipe model_split in YAML so restarted process boots with new partition."""
+    tspipe_config_path = _extract_cli_option(unparsed_args, "--tspipe-config")
+    if not tspipe_config_path:
+        logging.warning("Failover restart detected but --tspipe-config not found in CLI args")
+        return
+
+    partition = restart_payload.get("partition", {})
+    snet_partition = partition.get("snet_partition")
+    tnet_partition = partition.get("tnet_partition")
+    if not isinstance(snet_partition, list) or not isinstance(tnet_partition, list):
+        logging.warning("restart_config.json missing snet/tnet partition lists; skip YAML override")
+        return
+
+    with open(tspipe_config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    cfg.setdefault("tspipe", {})
+    cfg["tspipe"].setdefault("model_split", {})
+    cfg["tspipe"]["model_split"]["online"] = [int(v) for v in snet_partition]
+    cfg["tspipe"]["model_split"]["target"] = [int(v) for v in tnet_partition]
+
+    # Preserve detailed restart metadata for audit/debug.
+    cfg["tspipe"]["failover_restart"] = {
+        "gpu_assignment": partition.get("gpu_assignment", []),
+        "snet_stage_boundaries": partition.get("snet_stage_boundaries", []),
+        "tnet_stage_boundaries": partition.get("tnet_stage_boundaries", []),
+        "trigger_policy": restart_payload.get("trigger_policy"),
+        "step_id": restart_payload.get("step_id", 0),
+    }
+
+    with open(tspipe_config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimizer, steps_per_epoch: int):
+    """Load restart_config/checkpoint and return resume info for failover restart."""
+    restart_config_path = os.path.join(save_root, "restart_config.json")
+    if not os.path.exists(restart_config_path):
+        return {
+            "enabled": False,
+            "resume_step": 0,
+            "resume_epoch": 1,
+            "resume_batch_offset": 0,
+            "partition": None,
+        }
+
+    with open(restart_config_path, "r", encoding="utf-8") as f:
+        restart_payload = json.load(f)
+
+    _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+
+    checkpoint_path = restart_payload.get("checkpoint_path") or os.path.join(save_root, "failover_checkpoint_latest.pth")
+    resume_step = int(restart_payload.get("step_id", 0))
+
+    if os.path.exists(checkpoint_path):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        if "student_state_dict" in ckpt:
+            snet.load_state_dict(ckpt["student_state_dict"], strict=False)
+        if "teacher_state_dict" in ckpt:
+            tnet.load_state_dict(ckpt["teacher_state_dict"], strict=False)
+        if "optimizer_state_dict" in ckpt:
+            optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+        resume_step = int(ckpt.get("global_step", resume_step))
+    else:
+        logging.warning(f"restart_config found but checkpoint missing: {checkpoint_path}")
+
+    partition = restart_payload.get("partition", {})
+    partition_cfg = None
+    if isinstance(partition.get("snet_partition"), list) and isinstance(partition.get("tnet_partition"), list):
+        partition_cfg = PartitionConfig(
+            snet_partition=[int(v) for v in partition.get("snet_partition", [])],
+            tnet_partition=[int(v) for v in partition.get("tnet_partition", [])],
+            gpu_assignment=[int(v) for v in partition.get("gpu_assignment", [])],
+        )
+
+    resume_epoch = (resume_step // max(1, steps_per_epoch)) + 1
+    resume_batch_offset = resume_step % max(1, steps_per_epoch)
+
+    return {
+        "enabled": True,
+        "resume_step": resume_step,
+        "resume_epoch": resume_epoch,
+        "resume_batch_offset": resume_batch_offset,
+        "partition": partition_cfg,
+    }
+
+
+_resume_target_epoch = 0
+_resume_batches_to_skip = 0
+
+
+def _should_skip_resume_batch(epoch: int) -> bool:
+    """Skip already completed batches when resuming from a mid-epoch checkpoint."""
+    global _resume_target_epoch, _resume_batches_to_skip
+    if epoch == _resume_target_epoch and _resume_batches_to_skip > 0:
+        _resume_batches_to_skip -= 1
+        return True
+    return False
+
+
+def _run_dryrun_failover_cycle():
+    """Deterministic one-cycle failover dry-run for E2E launcher validation."""
+    global niter
+    logging.error("[DRYRUN] Starting E2E failover dry-run mode")
+
+    # Tiny dummy models/optimizer for checkpoint serialization path validation.
+    snet = torch.nn.Sequential(torch.nn.Linear(4, 4))
+    tnet = torch.nn.Sequential(torch.nn.Linear(4, 4))
+    optimizer = torch.optim.SGD(snet.parameters(), lr=0.01)
+
+    bootstrap = _load_failover_bootstrap(
+        save_root=args.save_root,
+        unparsed_args=unparsed,
+        snet=snet,
+        tnet=tnet,
+        optimizer=optimizer,
+        steps_per_epoch=10,
+    )
+    niter = int(bootstrap["resume_step"])
+
+    failover_optimizer = MathematicalFailoverOptimizer(total_epochs=1, steps_per_epoch=10)
+    # Keep assignment single-GPU for deterministic launcher nproc sync in dry-run.
+    failover_optimizer.current_partition = PartitionConfig(
+        snet_partition=[failover_optimizer.snet_num_layers],
+        tnet_partition=[failover_optimizer.tnet_num_layers],
+        gpu_assignment=[0],
+    )
+
+    def _save_failover_checkpoint(meta):
+        checkpoint_path = os.path.join(args.save_root, 'failover_checkpoint_latest.pth')
+        state = {
+            'global_step': niter,
+            'policy': meta.get('trigger_policy'),
+            'partition': meta.get('partition'),
+            'alpha_comp': meta.get('alpha_comp'),
+            'beta_comm': meta.get('beta_comm'),
+            'student_state_dict': snet.state_dict(),
+            'teacher_state_dict': tnet.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'timestamp': time.time(),
+        }
+        torch.save(state, checkpoint_path)
+        logging.error(f"[DRYRUN] Failover checkpoint saved: {checkpoint_path}")
+        return checkpoint_path
+
+    failover_optimizer.configure_failover_restart(
+        restart_config_path=os.path.join(args.save_root, 'restart_config.json'),
+        checkpoint_saver=_save_failover_checkpoint,
+        auto_restart_on_failover=True,
+    )
+
+    if not bootstrap["enabled"]:
+        # First boot: inject a deterministic failover event.
+        for step in range(0, 6):
+            niter = step
+            failover_optimizer.update_training_progress(step, 0)
+        logging.error("[DRYRUN] Injecting synthetic slowdown spike -> forcing REPLAN")
+        failover_optimizer.execute_policy("REPLAN", gpu_id=0, current_slowdown=3.0)
+        return
+
+    # Restarted boot: verify resume and continue a few steps, then exit 0.
+    logging.error(
+        f"Failover recovery successful. Resuming training from step [{niter}] with new partition."
+    )
+    for _ in range(3):
+        prev = niter
+        niter += 1
+        logging.error(f"[DRYRUN] Resume progress: step {prev} -> {niter}")
+    logging.error("[DRYRUN] Dry-run cycle completed successfully")
+
+
 def dummy_target_update(m, online_new_param: Optional[Iterable[torch.Tensor]], 
                         target_param: Optional[Iterable[torch.nn.Parameter]] = None):
     return target_param
 
 
 def main():
+    global niter, _resume_target_epoch, _resume_batches_to_skip
     logging.info("args = %s", args)
     logging.info("unparsed_args = %s", unparsed)
+
+    if args.dryrun_failover_cycle:
+        _run_dryrun_failover_cycle()
+        return
 
     logging.info('----------- Network Initialization --------------')
     image_size = 224 if 'cifar' not in args.data_name else 32
@@ -201,7 +396,25 @@ def main():
             test_dataset(root=args.img_root, transform=test_transform),
             batch_size=args.batch_size, shuffle=False, num_workers=24, pin_memory=True)
 
+    # Bootstrap failover recovery state before pipeline initialization.
+    bootstrap = _load_failover_bootstrap(
+        save_root=args.save_root,
+        unparsed_args=unparsed,
+        snet=snet,
+        tnet=tnet,
+        optimizer=optimizer,
+        steps_per_epoch=len(train_loader),
+    )
+    niter = int(bootstrap["resume_step"])
+    start_epoch = int(bootstrap["resume_epoch"])
+    _resume_target_epoch = start_epoch
+    _resume_batches_to_skip = int(bootstrap["resume_batch_offset"])
+
     # initialize tspipe (if needed)
+    slowdown_detector = None  # NEW: Initialize slowdown detector
+    failover_optimizer = None # NEW: Initialize math-based optimizer
+    timing_ingestor = None
+    
     if args.tspipe:
         if not isinstance(snet, torch.nn.Sequential):
             snet = snet.to_sequential()
@@ -213,6 +426,20 @@ def main():
                                     momentum = args.momentum, 
                                     weight_decay = args.weight_decay,
                                     nesterov = True)
+
+        # Re-load bootstrap state on the final (sequential) model/optimizer objects.
+        bootstrap = _load_failover_bootstrap(
+            save_root=args.save_root,
+            unparsed_args=unparsed,
+            snet=snet,
+            tnet=tnet,
+            optimizer=optimizer,
+            steps_per_epoch=len(train_loader),
+        )
+        niter = int(bootstrap["resume_step"])
+        start_epoch = int(bootstrap["resume_epoch"])
+        _resume_target_epoch = start_epoch
+        _resume_batches_to_skip = int(bootstrap["resume_batch_offset"])
 
         tspipe_trainer = TSPipe(
             snet,
@@ -228,9 +455,48 @@ def main():
             extra_args=args
         )
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
+        
+        # NEW: Initialize slowdown detection and failover policy components
+        slowdown_detector = SlowdownDetector()
+        failover_optimizer = MathematicalFailoverOptimizer(
+            total_epochs=args.epochs,
+            steps_per_epoch=len(train_loader)
+        )
+        if bootstrap["partition"] is not None:
+            failover_optimizer.current_partition = bootstrap["partition"]
+
+        def _save_failover_checkpoint(meta):
+            checkpoint_path = os.path.join(args.save_root, 'failover_checkpoint_latest.pth')
+            state = {
+                'global_step': niter,
+                'policy': meta.get('trigger_policy'),
+                'partition': meta.get('partition'),
+                'alpha_comp': meta.get('alpha_comp'),
+                'beta_comm': meta.get('beta_comm'),
+                'student_state_dict': snet.state_dict(),
+                'teacher_state_dict': tnet.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'timestamp': time.time(),
+            }
+            torch.save(state, checkpoint_path)
+            logging.error(f"💾 Failover checkpoint saved: {checkpoint_path}")
+            return checkpoint_path
+
+        failover_optimizer.configure_failover_restart(
+            restart_config_path=os.path.join(args.save_root, 'restart_config.json'),
+            checkpoint_saver=_save_failover_checkpoint,
+            auto_restart_on_failover=True,
+        )
+        timing_ingestor = RuntimeTimingIngestor(os.path.join(args.save_root, 'profiling_logs'))
+        logging.info("✅ Failover monitoring components initialized")
     else:
         snet = snet.cuda()
         tnet = tnet.cuda()  
+
+    if bootstrap["enabled"]:
+        logging.error(
+            f"Failover recovery successful. Resuming training from step [{niter}] with new partition."
+        )
 
     writer = SummaryWriter()
 
@@ -247,7 +513,7 @@ def main():
 
     best_top1 = 0
     best_top5 = 0
-    for epoch in range(1, args.epochs+1):
+    for epoch in range(start_epoch, args.epochs + 1):
         adjust_lr(optimizer, epoch)
 
         # train one epoch
@@ -256,7 +522,11 @@ def main():
             for param_group in optimizer.param_groups:
                 tspipe_trainer.update_lr(param_group['lr'])
                 break
-            train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoch, writer)
+            # NEW: Pass failover components to training function
+            train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoch, writer,
+                        slowdown_detector=slowdown_detector,
+                        failover_optimizer=failover_optimizer,
+                        timing_ingestor=timing_ingestor)
         else:
             train(train_loader, nets, optimizer, criterions, epoch, writer)
 
@@ -343,6 +613,76 @@ def auto_convert(output):
         return None, None, None, None, None, output
     return output
 
+
+class RuntimeTimingIngestor:
+    """Aggregate real per-GPU compute/comm timings from profiler trace files."""
+
+    def __init__(self, profiling_dir: str, window: int = 64):
+        self.profiling_dir = Path(profiling_dir)
+        self.window = max(8, int(window))
+        self._offsets = {}
+        self._compute_hist = {}
+        self._comm_hist = {}
+
+    def _append_hist(self, store, gpu_id: int, value: float):
+        buf = store.get(gpu_id)
+        if buf is None:
+            from collections import deque
+            buf = deque(maxlen=self.window)
+            store[gpu_id] = buf
+        buf.append(float(value))
+
+    def update(self):
+        if not self.profiling_dir.exists():
+            return
+
+        for trace_path in self.profiling_dir.glob("gpu_task_summary_partition*.jsonl"):
+            key = str(trace_path)
+            last_offset = self._offsets.get(key, 0)
+            try:
+                with open(trace_path, "r") as f:
+                    f.seek(last_offset)
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        gpu_id = int(record.get("device", -1))
+                        if gpu_id < 0:
+                            continue
+                        task_time_ms = float(record.get("time_ms", 0.0))
+                        if task_time_ms <= 0:
+                            continue
+
+                        task_name = str(record.get("task_name", ""))
+                        if task_name.startswith("compute"):
+                            self._append_hist(self._compute_hist, gpu_id, task_time_ms)
+                        elif task_name.startswith("copy"):
+                            self._append_hist(self._comm_hist, gpu_id, task_time_ms)
+                    self._offsets[key] = f.tell()
+            except OSError:
+                continue
+
+    def build_timing_payload(self):
+        payload = {}
+        all_gpu_ids = set(self._compute_hist.keys()) | set(self._comm_hist.keys())
+        for gpu_id in all_gpu_ids:
+            c_hist = self._compute_hist.get(gpu_id, [])
+            m_hist = self._comm_hist.get(gpu_id, [])
+            if not c_hist and not m_hist:
+                continue
+            compute_ms = (sum(c_hist) / len(c_hist)) if c_hist else 0.0
+            comm_ms = (sum(m_hist) / len(m_hist)) if m_hist else 0.0
+            payload[gpu_id] = {
+                "compute_time": compute_ms,
+                "comm_time": comm_ms,
+            }
+        return payload
+
 def train(train_loader, nets, optimizer, criterions, epoch, writer):
     global niter
 
@@ -367,6 +707,9 @@ def train(train_loader, nets, optimizer, criterions, epoch, writer):
     end = time.time()
     pbar = tqdm(train_loader)
     for i, (img, target) in enumerate(pbar, start=1):
+        if _should_skip_resume_batch(epoch):
+            continue
+
         data_time.update(time.time() - end)
 
         if args.cuda:
@@ -433,15 +776,64 @@ def tspipe_loss(model_out: torch.Tensor, ema_model_out: torch.Tensor, label: tor
     return cls_loss + kd_loss
 
 niter = 0
-def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterions, epoch, writer):
+def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterions, epoch, writer,
+                 slowdown_detector=None, failover_optimizer=None, timing_ingestor=None):
+    """TSPipe training with failover monitoring and policy decisions
+    
+    NEW: Integrated slowdown detection and dynamic policy selection
+    """
     global niter
 
     pbar = tqdm(train_loader)
     for i, (img, target) in enumerate(pbar, start=1):
+        if _should_skip_resume_batch(epoch):
+            continue
+
+        # Record batch start time
+        batch_start_time = time.time()
+        
         loss = tspipe_trainer.feed(img, img, target)
 
         if loss is None:
             continue
+
+        # NEW: Record batch time for slowdown detection
+        batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000  # Convert to ms
+
+        if failover_optimizer is not None:
+            # Keep progress tracker up to date every step for K_rem and phase transitions.
+            failover_optimizer.update_training_progress(niter, epoch)
+
+        if failover_optimizer is not None and timing_ingestor is not None:
+            timing_ingestor.update()
+            timing_payload = timing_ingestor.build_timing_payload()
+            if timing_payload:
+                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
+        
+        if slowdown_detector is not None:
+            # Record the stage time (in practice, this would be from profiler)
+            slowdown_detector.record_stage_time(batch_elapsed_time_ms)
+            
+            # Periodically check for slowdown (every 10 steps)
+            if niter % 10 == 0:
+                if slowdown_detector.is_slowdown_detected(threshold=1.05):
+                    slowdown_ratio = slowdown_detector.get_slowdown_ratio()
+                    logging.info(f"⚠️ Slowdown detected: {slowdown_ratio:.2f}x at step {niter}")
+
+                    # NEW: Use math-based optimizer for policy decision
+                    if failover_optimizer is not None:
+                        policy = failover_optimizer.evaluate_slowdown_and_decide(
+                            gpu_id=0,
+                            current_slowdown=slowdown_ratio
+                        )
+                        logging.info(
+                            f"🎯 Failover Policy Decision: {policy} "
+                            f"(step={niter}, slowdown={slowdown_ratio:.2f}x)"
+                        )
+                        
+                        # Execute the selected policy
+                        failover_optimizer.execute_policy(policy, gpu_id=0, 
+                                                         current_slowdown=slowdown_ratio)
 
         writer.add_scalar('loss', loss, global_step=niter)
         pbar.set_postfix({'loss': loss, 'batch_id': niter})

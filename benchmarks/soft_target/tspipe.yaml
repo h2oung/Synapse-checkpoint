@@ -4,17 +4,37 @@ tspipe:
     save_model_every_iter: 100
 
   model_split: 
-    # 3GPU
+    # 4GPU 설정 활성화 (실제 실험에서 검증된 설정)
+    target: [8, 4, 4, 14]   
+    online: [7, 8, 16, 26]  
+
+    # 3GPU - 백업용
+    #target: [6, 6, 6]   # vit_base 3GPU 분할 (합=18)
+    #online: [8, 8, 7]   # resnet50 3GPU 분할 (합=23)
+
+    # 원래 3GPU 설정들 (백업)
     #online: [19, 19, 19]   # 57 = 19+19+19  (student = resnet152)
     #target: [10, 10, 10]   # 30 = 10+10+10  (teacher = vit_large)
 
-    # 4GPU
-    #target: [8, 4, 4, 14] # Default
-    #online: [7, 8, 16, 26]
+    #vit_base랑 resnet50 default
+    #target: [5, 5, 4, 4]   # vit_base (sum=18)
+    #online: [6, 6, 6, 5]   # resnet50 (sum=23)
+
+    #vit_base랑 resnet50 최적분할
+    #target: [6, 3, 3, 6]  
+    #online: [6, 2, 4, 11]
+
+    # vit_large + resnet152 4GPU split (Experiment 0)
+    # target: [8, 8, 7, 7]
+    # online: [15, 14, 14, 14]
+
+    # 초간단 3GPU 설정 (사용 안함)
+    #target: [1, 1, 1, 0, 0, 0, 0]  # vit_base 최소 분할 (합=3)
+    #online: [1, 1, 1, 0, 0, 0, 0]   # resnet50 최소 분할 (합=3)
 
     # deit 모델 test 용
-    target: [4, 4, 4, 5]    # DeiT-Base (17)
-    online: [7, 8, 16, 26]  # ResNet-152 (57)
+    #target: [4, 4, 4, 5]    # DeiT-Base (17)
+    #online: [7, 8, 16, 26]  # ResNet-152 (57)
 
     # target: [8, 8, 7, 7] #임의로 만든 baseline용 균등분할
     # online: [15, 14, 14, 14]

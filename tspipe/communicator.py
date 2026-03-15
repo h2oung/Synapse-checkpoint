@@ -16,8 +16,22 @@ from torch.distributed import rpc
 from tspipe.logger import Log
 from tspipe.utils import use_device
 
-PYTORCH_DISTRIBUTED_NCCL_PORT = 31101
-PYTORCH_DISTRIBUTED_RPC_PORT = 31102
+import socket
+
+def find_free_port(start_port=31101, max_attempts=100):
+    """사용 가능한 포트 찾기"""
+    for port in range(start_port, start_port + max_attempts):
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.bind(('localhost', port))
+                return port
+        except OSError:
+            continue
+    raise RuntimeError(f"Could not find free port in range {start_port}-{start_port + max_attempts}")
+
+# 동적 포트 할당
+PYTORCH_DISTRIBUTED_NCCL_PORT = find_free_port()
+PYTORCH_DISTRIBUTED_RPC_PORT = find_free_port(PYTORCH_DISTRIBUTED_NCCL_PORT + 1)
 
 
 class TensorPlaceholder:
@@ -168,10 +182,15 @@ class Packet:
 
 
 class CommunicatorParam:
-    def __init__(self, ip: str, world_size: int, rank: int, num_partition: Optional[int] = None):
+    def __init__(self, ip: str, world_size: int, rank: int, num_partition: Optional[int] = None,
+                 nccl_port: Optional[int] = None, rpc_port: Optional[int] = None):
         self.ip = ip
         self.world_size = world_size
         self.rank = rank
+        # Ports must be determined ONCE in the parent process and passed to all children
+        # to avoid the spawn-reimport port mismatch bug.
+        self.nccl_port = nccl_port if nccl_port is not None else PYTORCH_DISTRIBUTED_NCCL_PORT
+        self.rpc_port = rpc_port if rpc_port is not None else PYTORCH_DISTRIBUTED_RPC_PORT
 
         self._num_part = self.world_size - 1 if num_partition is None else num_partition
 
@@ -431,7 +450,8 @@ class Communicator:
             print(f"Communicator is NCCL eligible: device={self.device}, rank={rank}, num_partition={self.comm_param.num_partition}")
             Log.v(f"Running communicator with device {device}")
             torch.cuda.set_device(self.device)
-            nccl_init_method = f'tcp://{ip}:{PYTORCH_DISTRIBUTED_NCCL_PORT}'
+            nccl_port = self.comm_param.nccl_port
+            nccl_init_method = f'tcp://{ip}:{nccl_port}'
             Log.v(f"Initializing process group at {nccl_init_method}")
 
             if rank == 0:
@@ -463,7 +483,8 @@ class Communicator:
 
             Log.v("NCCL Init Okay.")
 
-        rpc_init_method = f"tcp://{ip}:{PYTORCH_DISTRIBUTED_RPC_PORT}"
+        rpc_port = self.comm_param.rpc_port
+        rpc_init_method = f"tcp://{ip}:{rpc_port}"
         Log.v(f"Initializing RPC with {rpc_init_method} at node {rank}")
         rpc.init_rpc(f'node{rank}', rank=rank, world_size=world_size,
                      rpc_backend_options=rpc.TensorPipeRpcBackendOptions(init_method=rpc_init_method,

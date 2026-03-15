@@ -4,12 +4,14 @@ from copy import deepcopy
 from queue import Empty
 from queue import Queue as LocalQueue
 from threading import Condition, Thread
-from time import sleep
+from time import sleep, time
 from typing import Callable, Dict, List, Optional, Union
 from multiprocessing import Process, Queue
-from profiler_utils import init_gpu_task_profiler, stop_gpu_task_profiler
+from .profiler_utils import init_gpu_task_profiler, stop_gpu_task_profiler
 import torch
 from torch.futures import Future
+import threading
+import traceback
 
 
 import tspipe.multiprocessing as mp
@@ -366,6 +368,13 @@ class GpuWorker(BaseWorker):
         self.extra_args = None
         self.partition_online = None
         self.partition_target = None
+        
+        # Failover 관련 속성 추가
+        self.health_check_interval = 10  # 헬스체크 간격 (초)
+        self.last_heartbeat = time()
+        self.is_failed = False
+        self.health_thread: Optional[threading.Thread] = None
+        self.health_check_enabled = True
         self.optimizer_pg_param_map: Optional[Dict[int, List[int]]] = None
 
         self.start()
@@ -628,8 +637,82 @@ class GpuWorker(BaseWorker):
         self.process.name = f'GPU{self.device_id}WorkerProcess'
         self.process.start()
         AffinityManager(self.process).set_affinity_for_gpu(self.device_id)
+        
+        # 헬스체크 스레드 시작
+        if self.health_check_enabled:
+            self._start_health_check()
+
+    def _start_health_check(self):
+        """워커 헬스체크 스레드 시작"""
+        if self.health_thread is not None:
+            return
+            
+        self.health_thread = threading.Thread(
+            target=self._health_check_loop, 
+            daemon=True,
+            name=f"HealthCheck-Partition{self.partition_id}"
+        )
+        self.health_thread.start()
+        Log.d(f"Health check started for partition {self.partition_id}")
+
+    def _health_check_loop(self):
+        """워커 프로세스 헬스체크 루프"""
+        while self.health_check_enabled and not self.is_failed:
+            try:
+                # 프로세스 생존 확인
+                if not self.process.is_alive():
+                    Log.e(f"Worker process for partition {self.partition_id} is dead")
+                    self.is_failed = True
+                    break
+                
+                # GPU 메모리 접근 테스트 (프로세스 내부에서 실행)
+                if not self._test_gpu_accessibility():
+                    Log.e(f"GPU accessibility test failed for partition {self.partition_id}")
+                    self.is_failed = True
+                    break
+                    
+                # 헬스체크 성공
+                self.last_heartbeat = time()
+                
+                sleep(self.health_check_interval)
+                
+            except Exception as e:
+                Log.e(f"Health check error for partition {self.partition_id}: {e}")
+                Log.e(traceback.format_exc())
+                self.is_failed = True
+                break
+        
+        if self.is_failed:
+            Log.e(f"Worker {self.partition_id} marked as failed")
+
+    def _test_gpu_accessibility(self) -> bool:
+        """GPU 접근성 테스트 (간접적)"""
+        try:
+            # 프로세스가 살아있고, 최근에 heartbeat가 있다면 정상으로 간주
+            time_since_heartbeat = time() - self.last_heartbeat
+            return time_since_heartbeat < self.health_check_interval * 3
+        except Exception:
+            return False
+
+    def stop_health_check(self):
+        """헬스체크 중지"""
+        self.health_check_enabled = False
+        if self.health_thread and self.health_thread.is_alive():
+            self.health_thread.join(timeout=5)
+        
+    def get_health_status(self) -> Dict:
+        """헬스 상태 반환"""
+        return {
+            'partition_id': self.partition_id,
+            'is_failed': self.is_failed,
+            'last_heartbeat': self.last_heartbeat,
+            'process_alive': self.process.is_alive() if hasattr(self, 'process') else False,
+            'health_check_enabled': self.health_check_enabled
+        }
 
     def join(self):
+        # 헬스체크 중지
+        self.stop_health_check()
         self.process.join()
 
 

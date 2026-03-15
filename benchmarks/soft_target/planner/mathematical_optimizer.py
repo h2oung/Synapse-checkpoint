@@ -1,0 +1,929 @@
+"""
+Mathematical Model Based Optimizer (Enhanced)
+기존 단순 임계치 기반 로직을 ETA 수학적 모델로 대체
+
+수식: ETA(p) = C_restart(p) + K_rem * T(p)
+목표: 최적 정책 p* = argmin ETA(p) 선택
+"""
+import pandas as pd
+import numpy as np
+import sys
+import torch
+import time
+import json
+import os
+import logging
+from typing import Any, Callable, Dict, List, Optional
+
+# Configure logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# Import path setup
+proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+if proj_root not in sys.path:
+    sys.path.insert(0, proj_root)
+
+# Import new mathematical model components
+MATHEMATICAL_MODEL_AVAILABLE = False
+try:
+    # 패키지로 import되는 경우 (python -m benchmarks.soft_target.planner...) 
+    from .dynamic_policy_selector import DynamicPolicySelector, Policy
+    from .eta_calculator import create_default_restart_costs, RestartCosts
+    from .stage_time_predictor import PartitionConfig, StageTimePredictor
+    from .progress_tracker import ProgressTracker
+    from .dynamic_alpha_beta_estimator import DynamicAlphaBetaEstimator
+    MATHEMATICAL_MODEL_AVAILABLE = True
+    logger.info("✅ Mathematical model components loaded successfully (relative import)")
+except ImportError as e_rel:
+    try:
+        # 스크립트로 직접 실행되는 경우 (python benchmarks/soft_target/planner/...)
+        from planner.dynamic_policy_selector import DynamicPolicySelector, Policy
+        from planner.eta_calculator import create_default_restart_costs, RestartCosts
+        from planner.stage_time_predictor import PartitionConfig, StageTimePredictor
+        from planner.progress_tracker import ProgressTracker
+        from planner.dynamic_alpha_beta_estimator import DynamicAlphaBetaEstimator
+        MATHEMATICAL_MODEL_AVAILABLE = True
+        logger.info("✅ Mathematical model components loaded successfully (absolute import)")
+    except ImportError as e_abs:
+        MATHEMATICAL_MODEL_AVAILABLE = False
+        logger.warning(
+            "⚠️ Mathematical model not available, falling back to legacy logic: "
+            f"relative={e_rel}; absolute={e_abs}"
+        )
+
+class MathematicalFailoverOptimizer:
+    """수학적 모델 기반 Failover 최적화"""
+    
+    def __init__(self, 
+                 total_epochs: int = 1,
+                 steps_per_epoch: int = 1000,
+                 restart_costs: Optional[RestartCosts] = None,
+                 baseline_warmup_steps: int = 50):
+        self.logger = logging.getLogger(f"{__name__}.MathematicalFailoverOptimizer")
+        
+        # Load profiling data 
+        self._load_profiling_data()
+        
+        # Load GPU performance coefficients
+        self._load_gpu_coefficients()
+
+        # Phase-0 baseline collection configuration.
+        self.baseline_warmup_steps = max(1, int(baseline_warmup_steps))
+        self._baseline_frozen = False
+        self._baseline_count_compute: Dict[int, int] = {}
+        self._baseline_count_comm: Dict[int, int] = {}
+        
+        # Initialize mathematical model components  
+        if MATHEMATICAL_MODEL_AVAILABLE:
+            self.progress_tracker = ProgressTracker(total_epochs, steps_per_epoch)
+            self.alpha_beta_estimator = DynamicAlphaBetaEstimator(self.alpha_g, self.beta_g)
+            self.policy_selector = DynamicPolicySelector(
+                self.progress_tracker,
+                restart_costs or create_default_restart_costs(),
+                self.alpha_g,
+                self.beta_g
+            )
+            self.use_mathematical_model = True
+            self.logger.info("🧠 Using mathematical ETA model for decisions")
+        else:
+            self.alpha_beta_estimator = None
+            self.use_mathematical_model = False
+            self.logger.info("📊 Using legacy threshold-based model")
+            
+        # Legacy state tracking (for fallback)
+        self.sustained_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
+        self.replan_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
+        self.degrade_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
+        
+        # Current partition tracking
+        self.current_partition = self._create_default_partition()
+
+        # Runtime baseline buffers for dynamic alpha/beta estimation
+        self._baseline_compute_time: Dict[int, float] = {}
+        self._baseline_comm_time: Dict[int, float] = {}
+        self._latest_compute_time: Dict[int, float] = {}
+        self._latest_comm_time: Dict[int, float] = {}
+
+        # Runtime DP partitioner used at REPLAN/DEGRADE execution time.
+        self._runtime_stage_time_predictor = StageTimePredictor()
+
+        # Restart-based failover automation hooks (optional).
+        self._auto_restart_on_failover = False
+        self._checkpoint_saver: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None
+        self._restart_config_path = os.path.join(os.getcwd(), "restart_config.json")
+
+        # ETA breakdown debug log (JSONL)
+        self._eta_debug_log_path = os.path.join(
+            os.getcwd(),
+            "benchmarks",
+            "planner",
+            "logs",
+            "eta_breakdown.jsonl",
+        )
+        os.makedirs(os.path.dirname(self._eta_debug_log_path), exist_ok=True)
+        
+        self.logger.info(f"📈 Optimizer initialized: {self.snet_num_layers} SNet + {self.tnet_num_layers} TNet layers")
+
+    def configure_failover_restart(
+        self,
+        restart_config_path: Optional[str] = None,
+        checkpoint_saver: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None,
+        auto_restart_on_failover: bool = False,
+    ):
+        """Configure restart-based failover automation after REPLAN/DEGRADE apply."""
+        if restart_config_path:
+            self._restart_config_path = restart_config_path
+            os.makedirs(os.path.dirname(self._restart_config_path), exist_ok=True)
+        self._checkpoint_saver = checkpoint_saver
+        self._auto_restart_on_failover = bool(auto_restart_on_failover)
+        self.logger.info(
+            "⚙️ Failover restart automation configured "
+            f"(enabled={self._auto_restart_on_failover}, restart_config={self._restart_config_path})"
+        )
+
+    def _partition_boundaries(self, lengths: List[int]) -> List[List[int]]:
+        """Convert partition lengths to [start, end) boundaries."""
+        boundaries: List[List[int]] = []
+        start = 0
+        for length in lengths:
+            end = start + int(length)
+            boundaries.append([start, end])
+            start = end
+        return boundaries
+
+    def _build_restart_payload(self, policy: str) -> Dict[str, Any]:
+        """Build restart config payload from the latest partition/coefficient state."""
+        step_id = 0
+        t_base = 0.0
+        if self.use_mathematical_model:
+            step_id = int(self.progress_tracker.progress.current_step)
+            t_base = float(self.policy_selector.eta_calculator.restart_costs.T_base)
+
+        payload: Dict[str, Any] = {
+            "timestamp": time.time(),
+            "trigger_policy": str(policy),
+            "step_id": step_id,
+            "partition": {
+                "gpu_assignment": [int(g) for g in self.current_partition.gpu_assignment],
+                "snet_partition": [int(v) for v in self.current_partition.snet_partition],
+                "tnet_partition": [int(v) for v in self.current_partition.tnet_partition],
+                "snet_stage_boundaries": self._partition_boundaries(self.current_partition.snet_partition),
+                "tnet_stage_boundaries": self._partition_boundaries(self.current_partition.tnet_partition),
+            },
+            "alpha_comp": {int(k): float(v) for k, v in self.alpha_g.items()},
+            "beta_comm": {int(k): float(v) for k, v in self.beta_g.items()},
+            "restart_overhead": {
+                "formula": "4.37 + 50 * T_base",
+                "t_base": t_base,
+                "value": float(4.37 + 50.0 * t_base),
+            },
+        }
+        return payload
+
+    def _write_restart_config(self, payload: Dict[str, Any]):
+        """Overwrite restart_config.json with latest failover partition config."""
+        with open(self._restart_config_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def _trigger_failover_restart(self, policy: str):
+        """Export config, force checkpoint, and terminate process for external restart."""
+        if policy not in {"REPLAN", "DEGRADE"}:
+            return
+        if not self._auto_restart_on_failover:
+            return
+
+        payload = self._build_restart_payload(policy)
+        checkpoint_path = None
+
+        # Step 1: Export latest partition config first.
+        self._write_restart_config(payload)
+
+        # Step 2: Force checkpoint save right before exit.
+        if self._checkpoint_saver is not None:
+            try:
+                checkpoint_path = self._checkpoint_saver(payload)
+            except Exception as e:
+                self.logger.error(f"❌ Failed to save failover checkpoint: {e}")
+                checkpoint_path = None
+
+        if checkpoint_path:
+            payload["checkpoint_path"] = str(checkpoint_path)
+            self._write_restart_config(payload)
+
+        # Step 3: Exit for external process supervisor restart.
+        self.logger.error(
+            f"Failover triggered (Policy: {policy}). "
+            f"Partition saved to {os.path.basename(self._restart_config_path)}. "
+            "Restarting process..."
+        )
+        raise SystemExit(42)
+    
+    def _load_profiling_data(self):
+        """프로파일링 데이터 로드"""
+        # Load CSV files
+        tnet_df = pd.read_csv('./benchmarks/soft_target/planner/profile/tnet.csv')
+        snet_df = pd.read_csv('./benchmarks/soft_target/planner/profile/snet.csv')
+        self.tnet_num_layers = len(tnet_df)
+        self.snet_num_layers = len(snet_df)
+        
+        # Extract profiling data
+        self.tnet_forward_times_ms = tnet_df['forward_time_ms'].tolist()
+        self.tnet_param_sizes_kb = tnet_df['parameter_size_kb'].tolist()
+        self.tnet_input_activation_sizes_kb = tnet_df['input_activation_size_kb'].tolist()
+        
+        self.snet_forward_times_ms = snet_df['forward_time_ms'].tolist()
+        self.snet_backward_times_ms = snet_df['backward_time_ms'].tolist()
+        self.snet_param_sizes_kb = snet_df['parameter_size_kb'].tolist()
+        self.snet_input_activation_sizes_kb = snet_df['input_activation_size_kb'].tolist()
+        
+        # Network configuration
+        self.bandwidth_gbps = 8
+        self.bandwidth_kbps = self.bandwidth_gbps * 1024 * 1024
+        self.num_stages = 4
+        
+        # GPU memory info
+        device = torch.device("cuda:0")
+        total_memory = torch.cuda.get_device_properties(device).total_memory
+        self.total_memory_kb = total_memory / 1024
+        
+    def _load_gpu_coefficients(self):
+        """Initialize ratio-only coefficients (Phase-0 starts from homogeneous defaults)."""
+        gpu_count = max(1, torch.cuda.device_count())
+        self.alpha_g = {gpu_id: 1.0 for gpu_id in range(gpu_count)}
+        self.beta_g = {gpu_id: 1.0 for gpu_id in range(gpu_count)}
+        self.logger.info("📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0")
+
+    def _is_phase0_baseline_active(self) -> bool:
+        if self._baseline_frozen:
+            return False
+        if not self.use_mathematical_model:
+            return False
+        return self.progress_tracker.progress.current_step < self.baseline_warmup_steps
+
+    def _try_freeze_phase0_baseline(self):
+        if self._baseline_frozen or not self.use_mathematical_model:
+            return
+        if self.progress_tracker.progress.current_step < self.baseline_warmup_steps:
+            return
+        self._baseline_frozen = True
+        self._refresh_restart_cost_model()
+        self.logger.info(
+            f"📌 Phase-0 baseline frozen at step={self.progress_tracker.progress.current_step} "
+            f"(warmup={self.baseline_warmup_steps})"
+        )
+
+    def _estimate_baseline_step_time(self) -> float:
+        """Estimate baseline step bottleneck time from collected per-GPU runtime timings."""
+        candidates = []
+        gpu_ids = set(self._baseline_compute_time.keys()) | set(self._baseline_comm_time.keys())
+        for gpu_id in gpu_ids:
+            comp = float(self._baseline_compute_time.get(gpu_id, 0.0) or 0.0)
+            comm = float(self._baseline_comm_time.get(gpu_id, 0.0) or 0.0)
+            total = comp + comm
+            if total > 0:
+                candidates.append(total)
+
+        if not candidates:
+            return 1.0
+        return max(candidates)
+
+    def _refresh_restart_cost_model(self):
+        """Apply experiment-0B restart constants with runtime baseline step time."""
+        if not self.use_mathematical_model:
+            return
+
+        current = self.policy_selector.eta_calculator.restart_costs
+        t_base = self._estimate_baseline_step_time()
+        updated = RestartCosts(
+            C_load=4.37,
+            D_replan=0.0,
+            D_degrade=0.0,
+            R_replan=50.0,
+            R_degrade=50.0,
+            T_base=t_base,
+            T_opt_K=0.0,
+            T_opt_K_minus_1=0.0,
+        )
+        self.policy_selector.update_restart_costs(updated)
+
+    def _estimate_current_step_time(self) -> float:
+        """Estimate current step bottleneck from latest per-GPU compute+comm timings."""
+        candidates = []
+        gpu_ids = set(self._latest_compute_time.keys()) | set(self._latest_comm_time.keys())
+        for gpu_id in gpu_ids:
+            comp = float(self._latest_compute_time.get(gpu_id, 0.0) or 0.0)
+            comm = float(self._latest_comm_time.get(gpu_id, 0.0) or 0.0)
+            total = comp + comm
+            if total > 0:
+                candidates.append(total)
+        if not candidates:
+            return 0.0
+        return max(candidates)
+
+    def _write_eta_breakdown_jsonl(
+        self,
+        gpu_id: int,
+        current_slowdown: float,
+        recommended_policy: str,
+        eta_keep: float,
+        eta_replan: float,
+        eta_degrade: float,
+        reasoning: str,
+    ):
+        """Persist ETA breakdown for auditability of policy decisions."""
+        if not self.use_mathematical_model:
+            return
+
+        costs = self.policy_selector.eta_calculator.restart_costs
+        t_base = float(costs.T_base)
+        replan_overhead = 4.37 + 50.0 * t_base
+
+        payload = {
+            "timestamp": time.time(),
+            "step_id": int(self.progress_tracker.progress.current_step),
+            "gpu_id": int(gpu_id),
+            "slowdown": float(current_slowdown),
+            "recommended_policy": str(recommended_policy),
+            "alpha_comp": {int(k): float(v) for k, v in self.alpha_g.items()},
+            "beta_comm": {int(k): float(v) for k, v in self.beta_g.items()},
+            "current_step_time": float(self._estimate_current_step_time()),
+            "t_base": t_base,
+            "eta": {
+                "keep": float(eta_keep),
+                "replan": float(eta_replan),
+                "degrade": float(eta_degrade),
+            },
+            "eta_compare_keep_vs_replan": {
+                "keep": float(eta_keep),
+                "replan": float(eta_replan),
+                "delta_keep_minus_replan": float(eta_keep - eta_replan),
+            },
+            "replan_overhead": {
+                "formula": "4.37 + 50 * T_base",
+                "value": float(replan_overhead),
+                "c_load": 4.37,
+                "rollback_steps": 50,
+                "t_base": t_base,
+            },
+            "reasoning": reasoning,
+        }
+
+        try:
+            with open(self._eta_debug_log_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            self.logger.warning(f"Failed to write ETA debug JSONL: {e}")
+    
+    def _create_default_partition(self) -> PartitionConfig:
+        """기본 파티션 구성 생성"""
+        # 균등 분할로 시작
+        snet_layers_per_stage = self.snet_num_layers // self.num_stages
+        tnet_layers_per_stage = self.tnet_num_layers // self.num_stages
+        
+        return PartitionConfig(
+            snet_partition=[snet_layers_per_stage] * self.num_stages,
+            tnet_partition=[tnet_layers_per_stage] * self.num_stages,
+            gpu_assignment=list(range(self.num_stages))
+        )
+    
+    def update_training_progress(self, step_id: int, epoch: int = 0):
+        """훈련 진행상황 업데이트 (수학적 모델에서 K_rem 계산에 사용)"""
+        if self.use_mathematical_model:
+            self.progress_tracker.update_step(step_id, epoch)
+    
+    def evaluate_slowdown_and_decide(self, 
+                                   gpu_id: int, 
+                                   current_slowdown: float,
+                                   failed_gpus: Optional[List[int]] = None) -> str:
+        """
+        성능 저하 감지 시 최적 정책 결정
+        
+        Args:
+            gpu_id: 성능 저하가 감지된 GPU ID
+            current_slowdown: 현재 slowdown 비율
+            failed_gpus: 장애가 발생한 GPU 목록
+            
+        Returns:
+            str: 추천 정책 ("KEEP", "REPLAN", "DEGRADE")
+        """
+        if self.use_mathematical_model:
+            return self._decide_with_mathematical_model(gpu_id, current_slowdown, failed_gpus)
+        else:
+            return self._decide_with_legacy_logic(gpu_id, current_slowdown)
+    
+    def _decide_with_mathematical_model(self, 
+                                      gpu_id: int, 
+                                      current_slowdown: float,
+                                      failed_gpus: Optional[List[int]] = None) -> str:
+        """수학적 모델 기반 결정"""
+        self._try_freeze_phase0_baseline()
+        if self._is_phase0_baseline_active():
+            self.logger.info(
+                f"🧪 Phase-0 baseline collection active "
+                f"(step={self.progress_tracker.progress.current_step}/{self.baseline_warmup_steps}) -> KEEP"
+            )
+            return "KEEP"
+        try:
+            decision = self.policy_selector.evaluate_slowdown(
+                gpu_id, 
+                current_slowdown, 
+                self.current_partition,
+                failed_gpus
+            )
+            
+            policy_name = decision.recommended_policy.value.upper()
+            confidence = decision.confidence_score * 100
+            
+            self.logger.info(f"🎯 Mathematical Model Decision: {policy_name} (confidence: {confidence:.1f}%)")
+            self.logger.info(f"   Reasoning: {decision.reasoning}")
+
+            eta_keep = float(decision.eta_analysis.get(Policy.KEEP, float("inf")))
+            eta_replan = float(decision.eta_analysis.get(Policy.REPLAN, float("inf")))
+            eta_degrade = float(decision.eta_analysis.get(Policy.DEGRADE, float("inf")))
+            self._write_eta_breakdown_jsonl(
+                gpu_id=gpu_id,
+                current_slowdown=current_slowdown,
+                recommended_policy=policy_name,
+                eta_keep=eta_keep,
+                eta_replan=eta_replan,
+                eta_degrade=eta_degrade,
+                reasoning=decision.reasoning,
+            )
+            
+            return policy_name
+            
+        except Exception as e:
+            self.logger.error(f"❌ Mathematical model failed, falling back to legacy: {e}")
+            return self._decide_with_legacy_logic(gpu_id, current_slowdown)
+    
+    def _decide_with_legacy_logic(self, gpu_id: int, current_slowdown: float) -> str:
+        """기존 임계치 기반 결정 (fallback)"""
+        if current_slowdown < 1.1:
+            self.sustained_time[gpu_id] = 0
+            self.replan_time[gpu_id] = 0
+            self.degrade_time[gpu_id] = 0
+            return "KEEP"
+
+        if current_slowdown >= 1.25:
+            self.replan_time[gpu_id] += 1
+            self.sustained_time[gpu_id] += 1
+            if self.replan_time[gpu_id] >= 60:
+                self.logger.info(f"📊 Legacy Model: DEGRADE triggered for GPU {gpu_id}")
+                self.degrade_time[gpu_id] = 0
+                return "DEGRADE"
+
+        if current_slowdown >= 1.1:
+            self.sustained_time[gpu_id] += 1
+            if self.sustained_time[gpu_id] >= 30:
+                self.logger.info(f"📊 Legacy Model: REPLAN triggered for GPU {gpu_id}")
+                self.replan_time[gpu_id] = 0
+                self.degrade_time[gpu_id] = 0
+                return "REPLAN"
+
+        return "KEEP"
+    
+    def execute_policy(self, policy: str, gpu_id: int, current_slowdown: float):
+        """선택된 정책 실행"""
+        if policy == "REPLAN":
+            self._execute_replan(gpu_id, current_slowdown)
+        elif policy == "DEGRADE":
+            self._execute_degrade(gpu_id, current_slowdown)
+        elif policy == "KEEP":
+            self._execute_keep(gpu_id, current_slowdown)
+    
+    def _execute_replan(self, gpu_id: int, slowdown: float):
+        """REPLAN 정책 실행"""
+        self.logger.info(f"🔄 Executing REPLAN for GPU {gpu_id} (slowdown: {slowdown:.2f})")
+
+        active_gpus = list(self.current_partition.gpu_assignment)
+        new_partition = self.replan_optimizer(
+            "tnet.csv",
+            "snet.csv",
+            slowdown,
+            affected_gpu=gpu_id,
+            gpu_assignment=active_gpus,
+        )
+        if new_partition is not None:
+            self.current_partition = new_partition
+            self.logger.info(f"🔁 REPLAN applied new partition: {self.current_partition}")
+            self._trigger_failover_restart("REPLAN")
+        else:
+            self.logger.warning("REPLAN failed to produce a valid DP partition")
+        
+    def _execute_degrade(self, gpu_id: int, slowdown: float):
+        """DEGRADE 정책 실행"""
+        self.logger.info(f"⬇️ Executing DEGRADE by excluding GPU {gpu_id} (slowdown: {slowdown:.2f})")
+
+        active_gpus = [g for g in self.current_partition.gpu_assignment if g != gpu_id]
+        if not active_gpus:
+            self.logger.warning("DEGRADE skipped: no active GPU remains after exclusion")
+            return
+
+        new_partition = self._run_realtime_dp_repartition(active_gpus, policy_name="DEGRADE")
+        if new_partition is None:
+            self.logger.warning("DEGRADE failed to produce a valid DP partition")
+            return
+
+        self.current_partition = new_partition
+        self.logger.info(f"⬇️ DEGRADE applied new partition: {self.current_partition}")
+        self._trigger_failover_restart("DEGRADE")
+        
+    def _execute_keep(self, gpu_id: int, slowdown: float):
+        """KEEP 정책 실행 (아무것도 하지 않음)"""
+        self.logger.info(f"✅ Executing KEEP for GPU {gpu_id} (slowdown: {slowdown:.2f}) - No action needed")
+    
+    def _run_realtime_dp_repartition(self, gpu_assignment: List[int], policy_name: str) -> Optional[PartitionConfig]:
+        """Run minimax contiguous DP now using the latest monitored alpha/beta."""
+        if not gpu_assignment:
+            return None
+
+        partition = self._runtime_stage_time_predictor.solve_optimal_partition(
+            gpu_ids=list(gpu_assignment),
+            alpha_g=self.alpha_g,
+            beta_g=self.beta_g,
+        )
+        if partition is None:
+            return None
+
+        bottleneck = self._runtime_stage_time_predictor.calculate_partition_bottleneck_time(
+            partition,
+            alpha_g=self.alpha_g,
+            beta_g=self.beta_g,
+        )
+        self.logger.info(
+            f"🧮 {policy_name} realtime DP repartition complete "
+            f"(bottleneck={bottleneck:.4f}s, alpha={self.alpha_g}, beta={self.beta_g})"
+        )
+        return partition
+
+    def replan_optimizer(
+        self,
+        tnet_csv: str,
+        snet_csv: str,
+        slowdown: float,
+        avail_mem=None,
+        affected_gpu: Optional[int] = None,
+        gpu_assignment: Optional[List[int]] = None,
+    ):
+        """Real-time DP repartitioner for REPLAN using latest runtime coefficients."""
+        self.logger.info(f"🔧 Running realtime DP replan (slowdown factor: {slowdown})")
+        del tnet_csv, snet_csv, avail_mem, affected_gpu  # Kept for backward-compatible signature.
+        assignment = list(gpu_assignment) if gpu_assignment is not None else list(self.current_partition.gpu_assignment)
+        return self._run_realtime_dp_repartition(assignment, policy_name="REPLAN")
+    
+    def get_current_performance_summary(self) -> Dict[str, any]:
+        """현재 성능 및 결정 상태 요약"""
+        summary = {
+            "model_type": "mathematical" if self.use_mathematical_model else "legacy",
+            "snet_layers": self.snet_num_layers,
+            "tnet_layers": self.tnet_num_layers,
+            "num_stages": self.num_stages,
+            "alpha_g": dict(self.alpha_g),
+            "beta_g": dict(self.beta_g),
+        }
+        
+        if self.use_mathematical_model:
+            summary.update({
+                "progress_info": self.progress_tracker.get_progress_info(),
+                "decision_summary": self.policy_selector.get_decision_summary()
+            })
+        else:
+            summary.update({
+                "sustained_time": dict(self.sustained_time),
+                "replan_time": dict(self.replan_time),
+                "degrade_time": dict(self.degrade_time)
+            })
+            
+        return summary
+    
+    def update_measured_costs(self, measured_costs: Dict[str, float]):
+        """실제 측정된 비용으로 수학적 모델 업데이트"""
+        if not self.use_mathematical_model:
+            return
+            
+        # 측정된 비용을 RestartCosts 객체로 변환
+        restart_costs = RestartCosts(
+            C_load=measured_costs.get('checkpoint_load_time', 4.37),
+            D_replan=measured_costs.get('replan_time', 0.0),
+            D_degrade=measured_costs.get('degrade_time', 0.0),
+            R_replan=measured_costs.get('replan_factor', 50.0),
+            R_degrade=measured_costs.get('degrade_factor', 50.0),
+            T_base=measured_costs.get('base_stage_time', 1.0),
+            T_opt_K=measured_costs.get('optimization_K_time', 0.0),
+            T_opt_K_minus_1=measured_costs.get('optimization_K_minus_1_time', 0.0)
+        )
+        
+        self.policy_selector.update_restart_costs(restart_costs)
+        self.logger.info("📊 Mathematical model updated with measured costs")
+
+    def update_dynamic_alpha_beta(
+        self,
+        gpu_id: int,
+        current_compute_time: Optional[float] = None,
+        baseline_compute_time: Optional[float] = None,
+        current_comm_time: Optional[float] = None,
+        baseline_comm_time: Optional[float] = None,
+        ema: float = 0.2,
+    ):
+        """Update alpha/beta from measured runtime ratios (optional runtime hook)."""
+        if not self.use_mathematical_model or self.alpha_beta_estimator is None:
+            return
+
+        compute_ratio = None
+        if current_compute_time is not None and baseline_compute_time and baseline_compute_time > 0:
+            compute_ratio = float(current_compute_time) / float(baseline_compute_time)
+
+        comm_ratio = None
+        if current_comm_time is not None and baseline_comm_time and baseline_comm_time > 0:
+            comm_ratio = float(current_comm_time) / float(baseline_comm_time)
+
+        estimate = self.alpha_beta_estimator.update_from_ratios(
+            gpu_id=gpu_id,
+            compute_ratio=compute_ratio,
+            comm_ratio=comm_ratio,
+            ema=ema,
+        )
+        self.policy_selector.update_gpu_coefficients(
+            gpu_id=gpu_id,
+            alpha_comp=estimate.alpha_comp,
+            beta_comm=estimate.beta_comm,
+        )
+        # Keep local copies in sync for visibility and future fallback logic.
+        self.alpha_g[gpu_id] = estimate.alpha_comp
+        self.beta_g[gpu_id] = estimate.beta_comm
+
+    def ingest_runtime_timing(
+        self,
+        gpu_id: int,
+        compute_time: float,
+        comm_time: float,
+        baseline_compute_time: Optional[float] = None,
+        baseline_comm_time: Optional[float] = None,
+        ema: float = 0.2,
+    ):
+        """
+        Ingest measured per-GPU timings and update alpha/beta.
+
+        If baselines are not provided, first observed values are used as defaults.
+        """
+        gpu_id = int(gpu_id)
+        self._latest_compute_time[gpu_id] = float(compute_time)
+        self._latest_comm_time[gpu_id] = float(comm_time)
+        self._try_freeze_phase0_baseline()
+
+        # During phase-0, collect baseline only and keep alpha/beta fixed to 1.0.
+        if self._is_phase0_baseline_active():
+            if compute_time > 0:
+                c = self._baseline_count_compute.get(gpu_id, 0)
+                prev = self._baseline_compute_time.get(gpu_id, 0.0)
+                self._baseline_compute_time[gpu_id] = (prev * c + float(compute_time)) / (c + 1)
+                self._baseline_count_compute[gpu_id] = c + 1
+            if comm_time > 0:
+                c = self._baseline_count_comm.get(gpu_id, 0)
+                prev = self._baseline_comm_time.get(gpu_id, 0.0)
+                self._baseline_comm_time[gpu_id] = (prev * c + float(comm_time)) / (c + 1)
+                self._baseline_count_comm[gpu_id] = c + 1
+            # Freeze coefficients to neutral values until baseline collection ends.
+            self.alpha_g[gpu_id] = 1.0
+            self.beta_g[gpu_id] = 1.0
+            if self.use_mathematical_model:
+                self.policy_selector.update_gpu_coefficients(gpu_id=gpu_id, alpha_comp=1.0, beta_comm=1.0)
+            return
+
+        # Initialize baselines lazily if caller does not provide explicit values.
+        if baseline_compute_time is None:
+            baseline_compute_time = self._baseline_compute_time.get(gpu_id)
+            if baseline_compute_time is None and compute_time > 0:
+                baseline_compute_time = float(compute_time)
+                self._baseline_compute_time[gpu_id] = baseline_compute_time
+        else:
+            self._baseline_compute_time[gpu_id] = float(baseline_compute_time)
+
+        if baseline_comm_time is None:
+            baseline_comm_time = self._baseline_comm_time.get(gpu_id)
+            if baseline_comm_time is None and comm_time > 0:
+                baseline_comm_time = float(comm_time)
+                self._baseline_comm_time[gpu_id] = baseline_comm_time
+        else:
+            self._baseline_comm_time[gpu_id] = float(baseline_comm_time)
+
+        self.update_dynamic_alpha_beta(
+            gpu_id=gpu_id,
+            current_compute_time=compute_time,
+            baseline_compute_time=baseline_compute_time,
+            current_comm_time=comm_time,
+            baseline_comm_time=baseline_comm_time,
+            ema=ema,
+        )
+        if self._baseline_frozen:
+            self._refresh_restart_cost_model()
+
+    def ingest_runtime_timing_batch(
+        self,
+        timing_by_gpu: Dict[int, Dict[str, float]],
+        ema: float = 0.2,
+    ):
+        """
+        Batch ingestion helper.
+
+        Example input:
+            {
+              0: {"compute_time": 0.120, "comm_time": 0.030},
+              1: {"compute_time": 0.145, "comm_time": 0.035, "baseline_compute_time": 0.110}
+            }
+        """
+        for gpu_id, m in timing_by_gpu.items():
+            self.ingest_runtime_timing(
+                gpu_id=int(gpu_id),
+                compute_time=float(m.get("compute_time", 0.0)),
+                comm_time=float(m.get("comm_time", 0.0)),
+                baseline_compute_time=m.get("baseline_compute_time"),
+                baseline_comm_time=m.get("baseline_comm_time"),
+                ema=ema,
+            )
+        self._try_freeze_phase0_baseline()
+
+
+def monitor_and_replan_with_mathematical_model(total_epochs: int = 1, steps_per_epoch: int = 1000):
+    """
+    수학적 모델을 사용한 모니터링 및 재분할
+    기존 monitor_and_replan() 함수를 대체
+    """
+    optimizer = MathematicalFailoverOptimizer(total_epochs, steps_per_epoch)
+    
+    logger.info("🚀 Starting Mathematical Model Based Monitoring...")
+    
+    step_id = 0
+    
+    try:
+        while step_id < steps_per_epoch * total_epochs:
+            # 1. 훈련 진행상황 업데이트
+            current_epoch = step_id // steps_per_epoch
+            optimizer.update_training_progress(step_id, current_epoch)
+            
+            # 2. 각 GPU 성능 모니터링 (실제로는 GPU health monitor에서 호출)
+            for gpu_id in range(4):  # 4개 GPU 가정
+                # 실제 slowdown 측정 로직으로 교체
+                simulated_slowdown = simulate_gpu_slowdown(gpu_id, step_id)
+
+                # Runtime timing measurement hook (replace with real profiler metrics).
+                compute_t, comm_t = simulate_gpu_timings(gpu_id, step_id)
+                optimizer.ingest_runtime_timing(
+                    gpu_id=gpu_id,
+                    compute_time=compute_t,
+                    comm_time=comm_t,
+                    ema=0.2,
+                )
+                
+                if simulated_slowdown > 1.05:  # 5% 이상 느려진 경우
+                    # 3. 수학적 모델 기반 정책 결정
+                    policy = optimizer.evaluate_slowdown_and_decide(gpu_id, simulated_slowdown)
+                    
+                    # 4. 정책 실행
+                    optimizer.execute_policy(policy, gpu_id, simulated_slowdown)
+            
+            # 5. step 완료 시뮬레이션
+            time.sleep(0.1)  # 실제로는 훈련 step 실행 시간
+            step_id += 1
+            
+            # 주기적 상태 요약 출력
+            if step_id % 100 == 0:
+                summary = optimizer.get_current_performance_summary()
+                logger.info(f"📊 Step {step_id} Summary: {summary}")
+                
+    except KeyboardInterrupt:
+        logger.info("🛑 Monitoring stopped by user")
+    
+    final_summary = optimizer.get_current_performance_summary()
+    logger.info(f"🏁 Final Summary: {json.dumps(final_summary, indent=2)}")
+
+
+def benchmark_eta_overhead(
+    num_trials: int = 100,
+    slowdown: float = 1.3,
+    target_gpu: int = 1,
+) -> None:
+    """ETA 재계산 오버헤드를 반복 측정해서 평균을 출력.
+
+    CUDA_VISIBLE_DEVICES 등을 통해 물리 GPU (예: 1,4,5,6) 매핑은
+    외부에서 설정한다고 가정하고, 여기서는 논리 GPU ID만 사용한다.
+    """
+    if not MATHEMATICAL_MODEL_AVAILABLE:
+        logger.error("Mathematical model components are not available; cannot benchmark ETA.")
+        return
+
+    optimizer = MathematicalFailoverOptimizer(
+        total_epochs=1,
+        steps_per_epoch=200,
+        baseline_warmup_steps=3,
+    )
+
+    # Slowdown 지속시간 조건 제거해서 바로 ETA 계산 경로를 타도록 설정
+    optimizer.policy_selector.sustained_slowdown_duration = 0.0
+
+    gpu_ids = list(range(4))  # 논리 GPU 0~3 (물리 GPU 매핑은 환경 변수로 조정)
+
+    # Phase-0 baseline 수집 및 freeze (test_minimal_failover와 동일한 방식)
+    for step in range(3):
+        optimizer.update_training_progress(step_id=step, epoch=0)
+        batch = {g: {"compute_time": 0.10, "comm_time": 0.02} for g in gpu_ids}
+        optimizer.ingest_runtime_timing_batch(batch, ema=0.2)
+
+    # warmup 경계 이후 한 번 더 호출해서 baseline freeze 유도
+    optimizer.update_training_progress(step_id=optimizer.baseline_warmup_steps, epoch=0)
+    if not optimizer._baseline_frozen:
+        optimizer._try_freeze_phase0_baseline()
+
+    # Failover gate(초기 step<5, K_rem<10)를 넘기기 위해 step을 충분히 진행시킨다.
+    optimizer.update_training_progress(step_id=20, epoch=0)
+
+    logical_target_gpu = target_gpu
+    if logical_target_gpu not in gpu_ids:
+        logical_target_gpu = gpu_ids[0]
+
+    overheads_ms = []
+
+    logger.info(
+        f"🚀 Starting ETA overhead benchmark: trials={num_trials}, "
+        f"slowdown={slowdown:.2f}, target_gpu={logical_target_gpu} (logical)"
+    )
+
+    for _ in range(num_trials):
+        _policy = optimizer.evaluate_slowdown_and_decide(
+            gpu_id=logical_target_gpu,
+            current_slowdown=slowdown,
+        )
+        overhead = optimizer.policy_selector.last_eta_compute_ms
+        if overhead is not None:
+            overheads_ms.append(overhead)
+
+    if not overheads_ms:
+        logger.warning("No ETA overhead measurements collected.")
+        return
+
+    avg_ms = sum(overheads_ms) / len(overheads_ms)
+    min_ms = min(overheads_ms)
+    max_ms = max(overheads_ms)
+
+    logger.info(
+        f"📊 ETA computation overhead over {len(overheads_ms)} runs: "
+        f"avg={avg_ms:.4f} ms, min={min_ms:.4f} ms, max={max_ms:.4f} ms"
+    )
+
+def simulate_gpu_slowdown(gpu_id: int, step_id: int) -> float:
+    """GPU slowdown 시뮬레이션 (실제로는 GPU 모니터링에서 측정)"""
+    # 특정 조건에서 slowdown 발생하도록 시뮬레이션
+    if gpu_id == 1 and 200 <= step_id <= 400:  # GPU 1이 step 200-400에서 느려짐
+        return 1.3  # 30% 느려짐
+    elif gpu_id == 2 and step_id > 800:  # GPU 2가 후반부에 느려짐
+        return 1.15  # 15% 느려짐
+    return 1.0  # 정상
+
+
+def simulate_gpu_timings(gpu_id: int, step_id: int) -> tuple[float, float]:
+    """Synthetic compute/comm timings for demo of dynamic alpha/beta updates."""
+    # Baseline-like timings.
+    compute_t = 0.10
+    comm_t = 0.03
+
+    # Inject matching degradation into compute/comm channels.
+    if gpu_id == 1 and 200 <= step_id <= 400:
+        compute_t *= 1.30
+        comm_t *= 1.15
+    elif gpu_id == 2 and step_id > 800:
+        compute_t *= 1.15
+        comm_t *= 1.10
+
+    return compute_t, comm_t
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Mathematical failover optimizer utilities")
+    parser.add_argument(
+        "--mode",
+        choices=["monitor", "eta_bench"],
+        default="monitor",
+        help="monitor: full monitoring loop, eta_bench: ETA overhead benchmark",
+    )
+    parser.add_argument("--eta-trials", type=int, default=100, help="ETA benchmark 반복 횟수")
+    parser.add_argument("--eta-slowdown", type=float, default=1.3, help="ETA benchmark에서 사용할 slowdown 비율")
+    parser.add_argument(
+        "--eta-target-gpu",
+        type=int,
+        default=1,
+        help="ETA benchmark용 논리 GPU ID (CUDA_VISIBLE_DEVICES로 물리 GPU 매핑)",
+    )
+
+    args = parser.parse_args()
+
+    if args.mode == "monitor":
+        monitor_and_replan_with_mathematical_model(total_epochs=1, steps_per_epoch=1000)
+    else:
+        benchmark_eta_overhead(
+            num_trials=args.eta_trials,
+            slowdown=args.eta_slowdown,
+            target_gpu=args.eta_target_gpu,
+        )

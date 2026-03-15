@@ -1,0 +1,23 @@
+tspipe:
+  train:
+    deferred_batch_norm: false
+    save_model_every_iter: 100
+  model_split:
+    target:
+    - 8
+    - 4
+    - 14
+    online:
+    - 7
+    - 8
+    - 26
+  optimizer:
+    skip_optimizer: false
+    num_skip_initial_staleness: 0
+    gradient_accumulation: 1
+    reduce_verbose: false
+  gpipe_emulation:
+    enabled: false
+    num_ubatch: 1
+  async_param_update_emulation:
+    enabled: false

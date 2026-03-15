@@ -26,7 +26,7 @@ if not isinstance(tnet, torch.nn.Sequential):
     tnet = tnet.to_sequential()
 tnet.cuda()
 
-# print("Teacher model loaded: %s" % tnet)
+print("Teacher model loaded: %s" % tnet)
     
 snet = create_model('resnet152', num_class=100, image_size=224)
 checkpoint = torch.load('../results/base/base-i100-resnet152/initial_r152.pth.tar', 'cpu')
@@ -34,6 +34,39 @@ load_pretrained_model(snet, checkpoint['net'])
 if not isinstance(snet, torch.nn.Sequential):
     snet = snet.to_sequential()
 snet.cuda()
+
+'''
+# --- Teacher (vit_base) ---
+tnet = create_model('vit_base', num_class=100, image_size=224)
+checkpoint = torch.load('../results/base/base-i100-vit-base/teacher_init_vit_base.pth.tar', map_location='cpu')
+load_pretrained_model(tnet, checkpoint['net'])
+if not isinstance(tnet, torch.nn.Sequential):
+    tnet = tnet.to_sequential()
+tnet.cuda()
+
+# --- Student (resnet50) ---
+snet = create_model('resnet50', num_class=100, image_size=224)
+checkpoint = torch.load('../results/base/base-i100-resnet50/student_init_resnet50.pth.tar', map_location='cpu')
+load_pretrained_model(snet, checkpoint['net'])
+if not isinstance(snet, torch.nn.Sequential):
+    snet = snet.to_sequential()
+snet.cuda()
+'''
+# --- Teacher (vit_small) ---
+#tnet = create_model('vit_small', num_class=100, image_size=224)
+#checkpoint = torch.load('../results/base/base-i100-vit-small/initial_rall.pth.tar', map_location='cpu')
+#load_pretrained_model(tnet, checkpoint['net'])
+#if not isinstance(tnet, torch.nn.Sequential):
+#    tnet = tnet.to_sequential()
+#tnet.cuda()
+
+# --- Student (efficientnet-b0) ---
+#snet = create_model('efficientnet-b0', num_class=100, image_size=224)
+#checkpoint = torch.load('../results/base/base-i100-efficientnet-b0/initial_rentnet-b0.pth.tar', map_location='cpu')
+#load_pretrained_model(snet, checkpoint['net'])
+#if not isinstance(snet, torch.nn.Sequential):
+ #   snet = snet.to_sequential()
+#snet.cuda()
 
 # print("Student model loaded: %s" % snet)
 # sys.exit(0)

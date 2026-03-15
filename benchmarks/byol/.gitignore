@@ -1,5 +1,0 @@
-runs
-dataset/stl10_binary
-dataset/stl10_binary*
-**/*.pdf
-runs*

@@ -1,0 +1,40 @@
+args = Namespace(save_root='./results/e2e_failover_dryrun', img_root='./datasets', s_init='/tmp/dummy_s.pth', t_model='/tmp/dummy_t.pth', print_freq=50, epochs=200, batch_size=128, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=10, cuda=1, tspipe=True, seed=2, note='e2e_failover_dryrun', data_name='cifar100', t_name='resnet110', s_name='resnet20', kd_mode='logits', lambda_kd=1.0, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=True)
+unparsed_args = []
+[DRYRUN] Starting E2E failover dry-run mode
+📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0
+📈 ProgressTracker initialized: 1 epochs x 10 steps = 10 total steps
+📊 StageTimePredictor initialized: SNet=26 layers, TNet=18 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+🧠 DynamicPolicySelector initialized with mathematical model
+🧠 Using mathematical ETA model for decisions
+📊 StageTimePredictor initialized: SNet=26 layers, TNet=18 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+📈 Optimizer initialized: 26 SNet + 18 TNet layers
+⚙️ Failover restart automation configured (enabled=True, restart_config=./results/e2e_failover_dryrun/restart_config.json)
+📊 Progress: 0.0% (0/10), K_rem=10, Elapsed=0.0min
+[DRYRUN] Injecting synthetic slowdown spike -> forcing REPLAN
+🔄 Executing REPLAN for GPU 0 (slowdown: 3.00)
+🔧 Running realtime DP replan (slowdown factor: 3.0)
+🧮 REPLAN realtime DP repartition complete (bottleneck=0.2727s, alpha={0: 1.0}, beta={0: 1.0})
+🔁 REPLAN applied new partition: PartitionConfig(snet_partition=[26], tnet_partition=[18], gpu_assignment=[0])
+[DRYRUN] Failover checkpoint saved: ./results/e2e_failover_dryrun/failover_checkpoint_latest.pth
+Failover triggered (Policy: REPLAN). Partition saved to restart_config.json. Restarting process...
+args = Namespace(save_root='./results/e2e_failover_dryrun', img_root='./datasets', s_init='/tmp/dummy_s.pth', t_model='/tmp/dummy_t.pth', print_freq=50, epochs=200, batch_size=128, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=10, cuda=1, tspipe=True, seed=2, note='e2e_failover_dryrun', data_name='cifar100', t_name='resnet110', s_name='resnet20', kd_mode='logits', lambda_kd=1.0, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=True)
+unparsed_args = []
+[DRYRUN] Starting E2E failover dry-run mode
+Failover restart detected but --tspipe-config not found in CLI args
+📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0
+📈 ProgressTracker initialized: 1 epochs x 10 steps = 10 total steps
+📊 StageTimePredictor initialized: SNet=26 layers, TNet=18 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+🧠 DynamicPolicySelector initialized with mathematical model
+🧠 Using mathematical ETA model for decisions
+📊 StageTimePredictor initialized: SNet=26 layers, TNet=18 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+📈 Optimizer initialized: 26 SNet + 18 TNet layers
+⚙️ Failover restart automation configured (enabled=True, restart_config=./results/e2e_failover_dryrun/restart_config.json)
+Failover recovery successful. Resuming training from step [5] with new partition.
+[DRYRUN] Resume progress: step 5 -> 6
+[DRYRUN] Resume progress: step 6 -> 7
+[DRYRUN] Resume progress: step 7 -> 8
+[DRYRUN] Dry-run cycle completed successfully

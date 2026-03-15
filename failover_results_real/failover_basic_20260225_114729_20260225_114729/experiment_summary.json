@@ -1,0 +1,62 @@
+{
+  "experiment_info": {
+    "name": "failover_basic_20260225_114729",
+    "id": "failover_basic_20260225_114729_20260225_114729",
+    "duration_seconds": 141.533048,
+    "start_time": "2026-02-25T11:47:29.626034",
+    "end_time": "2026-02-25T11:49:51.159204"
+  },
+  "failover_statistics": {
+    "total_failures": 0,
+    "total_recoveries": 0,
+    "avg_recovery_time_ms": 0.0,
+    "failure_gpu_ids": []
+  },
+  "performance_statistics": {
+    "total_metrics_collected": 126,
+    "avg_cpu_usage_percent": 12.906349206349205,
+    "gpu_utilization_summary": {
+      "0": {
+        "avg_utilization": 46.04761904761905,
+        "max_utilization": 47,
+        "min_utilization": 41
+      },
+      "1": {
+        "avg_utilization": 51.06349206349206,
+        "max_utilization": 55,
+        "min_utilization": 47
+      },
+      "2": {
+        "avg_utilization": 0.5158730158730159,
+        "max_utilization": 62,
+        "min_utilization": 0
+      },
+      "3": {
+        "avg_utilization": 80.98412698412699,
+        "max_utilization": 100,
+        "min_utilization": 20
+      },
+      "4": {
+        "avg_utilization": 81.36507936507937,
+        "max_utilization": 100,
+        "min_utilization": 28
+      },
+      "5": {
+        "avg_utilization": 80.4920634920635,
+        "max_utilization": 100,
+        "min_utilization": 34
+      },
+      "6": {
+        "avg_utilization": 81.30952380952381,
+        "max_utilization": 100,
+        "min_utilization": 9
+      }
+    }
+  },
+  "file_locations": {
+    "main_log": "./failover_results_real/failover_basic_20260225_114729_20260225_114729/experiment.log",
+    "performance_data": "./failover_results_real/failover_basic_20260225_114729_20260225_114729/performance.jsonl",
+    "failover_events": "./failover_results_real/failover_basic_20260225_114729_20260225_114729/failover_events.jsonl",
+    "plots_directory": "./failover_results_real/failover_basic_20260225_114729_20260225_114729/plots"
+  }
+}

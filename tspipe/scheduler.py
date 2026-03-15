@@ -543,6 +543,188 @@ class TSPipeScheduler():
         else:
             self.num_skip_staleness = config['optimizer']['num_skip_initial_staleness']
             self.gpipe_num_ubatch = None
+            
+        # Failover 관련 속성 추가
+        self.original_num_partitions = num_partitions
+        self.current_partition_config = None
+        self.failover_active = False
+        self.reconfiguration_pending = False
+
+    def update_partition_config(self, new_num_partitions: int, new_config: Dict):
+        """파티션 설정 업데이트 (Failover 시 호출)"""
+        from tspipe.logger import Log
+        
+        Log.i(f"🔀 Updating partition configuration: {self.num_partitions} -> {new_num_partitions}")
+        
+        old_partitions = self.num_partitions
+        self.num_partitions = new_num_partitions
+        self.current_partition_config = new_config
+        self.failover_active = True
+        
+        Log.i(f"✅ Partition configuration updated: partitions={new_num_partitions}")
+        
+        return {
+            'old_partitions': old_partitions,
+            'new_partitions': new_num_partitions,
+            'new_config': new_config
+        }
+
+    def dynamic_repartition(self, available_gpu_count: int, model_config: Dict) -> Dict:
+        """동적 모델 재분할 (GPU 실패 시)"""
+        from tspipe.logger import Log
+        
+        Log.i(f"🧮 Computing dynamic repartition for {available_gpu_count} GPUs")
+        
+        if available_gpu_count <= 0:
+            raise ValueError("Cannot repartition with 0 GPUs")
+        
+        # 기본 균등 분할 전략
+        new_config = self._compute_equal_partition(available_gpu_count, model_config)
+        
+        # 더 정교한 분할 알고리즘 적용 (옵션)
+        optimized_config = self._optimize_partition_with_dp(available_gpu_count, model_config)
+        if optimized_config:
+            new_config = optimized_config
+        
+        Log.i(f"✅ Dynamic repartition computed: {new_config}")
+        return new_config
+
+    def _compute_equal_partition(self, num_gpus: int, model_config: Dict) -> Dict:
+        """균등 분할 계산"""
+        online_layers = model_config.get('online', [])
+        target_layers = model_config.get('target', [])
+        
+        total_online = sum(online_layers) if online_layers else 0
+        total_target = sum(target_layers) if target_layers else 0
+        
+        # 균등 분할
+        online_per_gpu = max(1, total_online // num_gpus)
+        target_per_gpu = max(1, total_target // num_gpus)
+        
+        new_online = [online_per_gpu] * num_gpus
+        new_target = [target_per_gpu] * num_gpus
+        
+        # 나머지 레이어들을 마지막 GPU에 할당
+        remaining_online = total_online - sum(new_online)
+        remaining_target = total_target - sum(new_target)
+        
+        if remaining_online > 0:
+            new_online[-1] += remaining_online
+        if remaining_target > 0:
+            new_target[-1] += remaining_target
+        
+        return {
+            'online': new_online,
+            'target': new_target
+        }
+
+    def _optimize_partition_with_dp(self, num_gpus: int, model_config: Dict) -> Optional[Dict]:
+        """동적 프로그래밍을 이용한 최적 분할 (간단한 버전)"""
+        try:
+            # 실제 DP 알고리즘 구현은 복잡하므로, 여기서는 간단한 휴리스틱 적용
+            # 논문의 알고리즘을 간소화한 버전
+            
+            online_layers = model_config.get('online', [])
+            target_layers = model_config.get('target', [])
+            
+            if not online_layers or not target_layers:
+                return None
+            
+            total_online = sum(online_layers)
+            total_target = sum(target_layers)
+            
+            # GPU 수가 적을 때는 비율을 유지하면서 분할
+            if num_gpus < len(online_layers):
+                # 원본 비율 기반 분할
+                online_ratios = [x / total_online for x in online_layers]
+                target_ratios = [x / total_target for x in target_layers]
+                
+                # 새로운 파티션 수에 맞게 그룹핑
+                groups_per_gpu = len(online_layers) // num_gpus
+                remainder = len(online_layers) % num_gpus
+                
+                new_online = []
+                new_target = []
+                
+                start_idx = 0
+                for gpu_idx in range(num_gpus):
+                    group_size = groups_per_gpu + (1 if gpu_idx < remainder else 0)
+                    end_idx = start_idx + group_size
+                    
+                    # 해당 그룹의 레이어 합산
+                    online_sum = sum(online_layers[start_idx:end_idx])
+                    target_sum = sum(target_layers[start_idx:end_idx])
+                    
+                    new_online.append(online_sum)
+                    new_target.append(target_sum)
+                    
+                    start_idx = end_idx
+                
+                return {
+                    'online': new_online,
+                    'target': new_target
+                }
+            
+        except Exception as e:
+            from tspipe.logger import Log
+            Log.e(f"DP optimization failed: {e}")
+            
+        return None
+
+    def handle_partition_failure(self, failed_partition_ids: List[int]) -> Dict:
+        """파티션 실패 처리"""
+        from tspipe.logger import Log
+        
+        Log.w(f"🚨 Handling partition failures: {failed_partition_ids}")
+        
+        remaining_partitions = self.num_partitions - len(failed_partition_ids)
+        
+        if remaining_partitions <= 0:
+            raise RuntimeError("All partitions have failed!")
+        
+        # 스케줄 재조정 필요 플래그 설정
+        self.reconfiguration_pending = True
+        
+        Log.i(f"📋 Partition failure handling complete. Remaining: {remaining_partitions}")
+        
+        return {
+            'failed_partitions': failed_partition_ids,
+            'remaining_partitions': remaining_partitions,
+            'reconfiguration_needed': True
+        }
+
+    def wait_for_current_batch_completion(self):
+        """현재 배치 완료 대기 (Failover 시 안전한 재구성을 위해)"""
+        from tspipe.logger import Log
+        import time
+        
+        Log.i("⏳ Waiting for current batch completion before reconfiguration...")
+        
+        # TODO: 실제 배치 완료 시그널 구현
+        # 현재는 임시로 고정 대기 시간 사용
+        time.sleep(2.0)
+        
+        Log.i("✅ Current batch completion wait finished")
+
+    def reset_failover_state(self):
+        """Failover 상태 리셋"""
+        from tspipe.logger import Log
+        
+        self.failover_active = False
+        self.reconfiguration_pending = False
+        self.current_partition_config = None
+        
+        Log.i("🔄 Scheduler failover state reset")
+
+    def get_failover_status(self) -> Dict:
+        """Failover 상태 반환"""
+        return {
+            'failover_active': self.failover_active,
+            'reconfiguration_pending': self.reconfiguration_pending,
+            'original_partitions': self.original_num_partitions,
+            'current_partitions': self.num_partitions,
+            'current_config': self.current_partition_config
+        }
 
     # 스케줄 내 작업 유효성 체크: 스케줄에서 요구하는 batch가 input queue에 들어올 때까지 blocking
     def throttle_until_batch_available(self, lst_sched: Iterable[Optional[PipelineSchedule]]):

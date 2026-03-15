@@ -12,6 +12,11 @@ from functools import partial
 from itertools import chain
 from typing import Iterable, Optional
 
+# ensure the soft_target directory (project root) is on sys.path so we can import planner modules
+proj_root = os.path.abspath(os.path.dirname(__file__))
+if proj_root not in sys.path:
+    sys.path.insert(0, proj_root)
+
 import numpy as np
 import torch
 import torchvision.datasets as dst
@@ -43,6 +48,7 @@ parser.add_argument('--t_model', type=str, required=True, help='path name of tea
 parser.add_argument('--print_freq', type=int, default=50, help='frequency of showing training results on console')
 parser.add_argument('--epochs', type=int, default=200, help='number of total epochs to run')
 parser.add_argument('--batch_size', type=int, default=128, help='The size of batch')
+parser.add_argument('--num_workers', type=int, default=4, help='Number of dataloader workers')
 parser.add_argument('--lr', type=float, default=0.1, help='initial learning rate')
 parser.add_argument('--momentum', type=float, default=0.9, help='momentum')
 parser.add_argument('--weight_decay', type=float, default=1e-4, help='weight decay')
@@ -80,7 +86,21 @@ parser.add_argument('--init_var', type=float, default=5.0, help='initial varianc
 parser.add_argument('--att_f', type=float, default=1.0, help='attention factor of mid_channels for AFD')
 
 parser.add_argument('--max_step_profiling', type=int, default=20, help='maximum number of profiling steps')
+parser.add_argument('--max-runtime-seconds', type=int, default=0,
+                    help='Stop TSPipe training loop after this many seconds (0 disables time limit)')
+parser.add_argument('--prepare-planner', action='store_true', help='Run planner preparation: require baseline CSVs and generate alpha_beta_values.json')
 
+# Failover related arguments
+parser.add_argument('--failover-enable', action='store_true', help='Enable GPU failover mechanism')
+parser.add_argument('--backup-gpus', type=str, default='', help='Comma-separated list of backup GPU IDs')
+parser.add_argument('--health-check-interval', type=int, default=5, help='Interval for GPU health checks in seconds')
+parser.add_argument('--auto-recover', action='store_true', help='Enable automatic recovery after failover')
+parser.add_argument('--failure-threshold', type=int, default=3, help='Number of failed checks before failover')
+parser.add_argument('--failover-experiment', type=str, default='', help='Failover experiment name for logging')
+parser.add_argument('--target-fail-gpu', type=int, default=-1, help='GPU to simulate failure on')
+parser.add_argument('--fail-after-batches', type=int, default=10, help='Number of batches before simulating failure')
+parser.add_argument('--resume-checkpoint', type=str, default='',
+                    help='Path to healthy_checkpoint_latest.pth for failure recovery resume')
 
 args, unparsed = parser.parse_known_args()
 
@@ -201,10 +221,10 @@ def main():
     # define data loader
     train_loader = torch.utils.data.DataLoader(
             train_dataset(root=args.img_root, transform=train_transform),
-            batch_size=args.batch_size, shuffle=True, num_workers=24, pin_memory=True)
+            batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True, drop_last=True)
     test_loader = torch.utils.data.DataLoader(
             test_dataset(root=args.img_root, transform=test_transform),
-            batch_size=args.batch_size, shuffle=False, num_workers=24, pin_memory=True)
+            batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     # initialize tspipe (if needed)
     if args.tspipe:
@@ -212,7 +232,35 @@ def main():
             snet = snet.to_sequential()
         if not isinstance(tnet, torch.nn.Sequential):
             tnet = tnet.to_sequential()
-        
+
+        # --- Resume from healthy checkpoint if provided ---
+        _resumed_batch_count = 0
+        if args.resume_checkpoint and os.path.isfile(args.resume_checkpoint):
+            logging.info(f"[RESUME] Loading checkpoint: {args.resume_checkpoint}")
+            _ckpt_load_start = time.time()
+            _ckpt = torch.load(args.resume_checkpoint, map_location='cpu')
+            if isinstance(_ckpt, dict) and 'model_state_dict' in _ckpt:
+                snet.load_state_dict(_ckpt['model_state_dict'])
+                _resumed_batch_count = _ckpt.get('batch_count', 0)
+                logging.info(f"[RESUME] Loaded model weights (batch_count={_resumed_batch_count})")
+            else:
+                # Legacy checkpoint: plain state_dict
+                snet.load_state_dict(_ckpt)
+                logging.info("[RESUME] Loaded plain state_dict (no batch_count info)")
+            _ckpt_load_sec = time.time() - _ckpt_load_start
+            logging.info(f"[RESUME] C_load = {_ckpt_load_sec:.3f} sec")
+            # Write C_load info to a file so the orchestrator can read it
+            _resume_info_path = os.path.join(args.save_root, 'resume_info.json')
+            import json as _json
+            with open(_resume_info_path, 'w') as _rf:
+                _json.dump({
+                    'resume_checkpoint': args.resume_checkpoint,
+                    'c_load_sec': _ckpt_load_sec,
+                    'resumed_batch_count': _resumed_batch_count,
+                    'resume_timestamp': time.time(),
+                }, _rf, indent=2)
+            del _ckpt
+
         optimizer = torch.optim.SGD(snet.parameters(),
                                     lr = args.lr,
                                     momentum = args.momentum, 
@@ -233,6 +281,21 @@ def main():
             extra_args=args
         )
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
+        # If requested, prepare planner alpha/beta from baseline CSVs and exit
+        if args.prepare_planner:
+            from planner.alpha_beta_generator import compute_and_save_alpha_beta
+            # default baseline paths used by StageTimePredictor
+            base_dir = os.path.join(os.path.dirname(__file__), 'planner', 'profile')
+            snet_csv = os.path.join(base_dir, 'snet.csv')
+            tnet_csv = os.path.join(base_dir, 'tnet.csv')
+            if not os.path.isfile(snet_csv) or not os.path.isfile(tnet_csv):
+                logging.error('Baseline profile CSVs not found. Run profiler to generate snet.csv & tnet.csv first.')
+                sys.exit(1)
+            out_path = os.path.abspath(os.path.join(os.path.dirname(__file__), 'alpha_beta_values.json'))
+            alpha_g, beta_g = compute_and_save_alpha_beta(snet_csv, tnet_csv, out_path=out_path)
+            logging.info(f'Alpha/Beta generated and saved to {out_path}')
+            # exit after preparation
+            sys.exit(0)
     else:
         snet = snet.cuda()
         tnet = tnet.cuda()  
@@ -297,10 +360,26 @@ def main():
         logging.info("Interrupt detected! Flushing profiler data...")
     finally:
         if args.tspipe:
+            logging.info("[CLEANUP] Starting TSPipe stop()...")
             torch.cuda.synchronize()
-            tspipe_trainer.stop()
+            # Start a watchdog timer: force-exit after 60s if stop() hangs
+            import threading as _thr
+            def _force_exit():
+                logging.info("[CLEANUP] Force-exit triggered after 60s timeout.")
+                os._exit(0)
+            _watchdog = _thr.Timer(60.0, _force_exit)
+            _watchdog.daemon = True
+            _watchdog.start()
+            try:
+                tspipe_trainer.stop()
+            except Exception as e:
+                logging.info(f"[CLEANUP] stop() raised: {e}")
+            _watchdog.cancel()
+            logging.info("[CLEANUP] TSPipe stop() completed.")
         torch.cuda.profiler.stop()
         logging.info("Profiler stopped safely.")
+        logging.info("[CLEANUP] Exiting process.")
+        os._exit(0)
 
 
 def train_init(train_loader, nets, optimizer, criterions, total_epoch):
@@ -475,7 +554,14 @@ def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoc
     global niter
     pbar = tqdm(train_loader)
     torch.cuda.profiler.start()
+    loop_start_time = time.time()
     for i, (img, target) in enumerate(pbar, start=1):
+        if args.max_runtime_seconds > 0 and (time.time() - loop_start_time) >= args.max_runtime_seconds:
+            torch.cuda.synchronize()
+            time.sleep(1)
+            torch.cuda.profiler.stop()
+            break
+
         if niter >= args.max_step_profiling:
             torch.cuda.synchronize()
             time.sleep(1)
@@ -490,7 +576,7 @@ def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoc
         pbar.set_postfix({'loss': loss, 'batch_id': niter})
         niter += 1
 
-    tspipe_trainer.stop() 
+    # NOTE: stop() is called in main()'s finally block, not here, to avoid double-stop crash
 
 
 def test(test_loader, nets, criterions, epoch):

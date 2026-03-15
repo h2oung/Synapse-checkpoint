@@ -20,7 +20,7 @@ from tspipe.utils import (find_path_tensor_requires_grad, get_bytes,
                           traverse_object_tensor_foreach, traverse_path_apply,
                           traverse_tensor_map, use_stream, wait_stream)
 
-from profiler_utils import create_compute_profile_hooks
+from .profiler_utils import create_compute_profile_hooks
 
 
 __all__ = ['TaskType', 'GpuTask', 'GpuTaskContext', 'StreamType', 'StreamDescriptor',
@@ -556,7 +556,11 @@ def feed_batch(ctx: 'LocalTaskContext', task: 'GpuTask'):
         if task.asymmetric:
             for view_idx in [1, 0]:
                 batch_to_feed: List[Batch] = batches_list[view_idx]
-                for _idx in range(ctx.num_ubatch):
+                if len(batch_to_feed) < ctx.num_ubatch:
+                    print(f"[WARN] feed_batch: batch_to_feed has {len(batch_to_feed)} items but "
+                          f"ctx.num_ubatch={ctx.num_ubatch}. Adjusting to min.", flush=True)
+                num_to_feed = min(len(batch_to_feed), ctx.num_ubatch)
+                for _idx in range(num_to_feed):
                     ubatch = Microbatch(task.batch_id, view_idx, _idx, view_idx == 1, batch_to_feed[_idx])
                     ctx.lst_queue_batch_feed_out[_idx].put(ubatch)
             ubatch_label = Microbatch(task.batch_id, 0, 0, False, task.label_batch)

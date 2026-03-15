@@ -9,10 +9,13 @@ from queue import Empty
 from threading import Thread
 from time import sleep, time
 from typing import Callable, Dict, Iterable, List, Optional, Tuple, Union, cast
+import json
 
 import torch
 import yaml
 import sys
+import psutil
+import os
 
 import tspipe
 from tspipe import batch_ops
@@ -21,7 +24,9 @@ from tspipe.batch_ops import (Batch, BatchQueue, ScatterGatherFn,
                               defaultScatterGatherFn)
 from tspipe.batchnorm import DeferredBatchNorm
 from tspipe.communicator import (Channel, Communicator, CommunicatorParam,
-                                 DistributedQueue)
+                                 DistributedQueue,
+                                 PYTORCH_DISTRIBUTED_NCCL_PORT,
+                                 PYTORCH_DISTRIBUTED_RPC_PORT)
 from tspipe.gpu_context import StreamDescriptor, StreamType, TaskContext
 from tspipe.gpu_task import GpuTask, TaskType
 from tspipe.gpu_worker import GpuWorker, LocalWorker
@@ -30,6 +35,11 @@ from tspipe.profiler import Operation, ProfilerDelegateWorker, profile_init, TSP
 from tspipe.scheduler import TSPipeScheduler
 from tspipe.prototype_scheduler import TSPipeSchedulerKD
 from tspipe.utils import get_shape, verify_module
+
+# Failover 관련 임포트 추가
+from tspipe.gpu_health_monitor import GPUHealthMonitor, GPUFailureEvent, ProcessHealthMonitor
+from tspipe.failover_logger import (FailoverExperimentLogger, init_experiment_logger, 
+                                  get_experiment_logger, finalize_experiment_logger)
 
 BATCH_FEED_THESH = 4
 
@@ -69,6 +79,20 @@ class TSPipe():
         parser.add_argument("--ip", required=True, type=str)
         parser.add_argument("--rank", required=True, type=int, default=0)
         parser.add_argument("--num-nodes", required=True, type=int, default=1)
+        
+        # Failover 관련 인자들 추가
+        parser.add_argument("--failover-enable", action="store_true", help="Enable GPU failover system")
+        parser.add_argument("--failover-experiment", type=str, default="", help="Failover experiment name")
+        parser.add_argument("--backup-gpus", type=str, default="", help="Comma-separated backup GPU IDs")
+        parser.add_argument("--health-check-interval", type=int, default=5, help="GPU health check interval (seconds)")
+        parser.add_argument("--target-fail-gpu", type=int, default=-1, help="Target GPU to simulate failure")
+        parser.add_argument("--fail-after-batches", type=int, default=10, help="Simulate failure after N batches")
+        parser.add_argument("--healthy-checkpoint-interval", type=int, default=20,
+                    help="Periodic healthy checkpoint interval in steps")
+        parser.add_argument("--checkpoint-benchmark-enable", action="store_true",
+                    help="Enable checkpoint benchmark metrics logging (Experiment 0)")
+        parser.add_argument("--checkpoint-benchmark-prefix", type=str, default="exp0_checkpoint",
+                    help="Prefix for Experiment 0 metrics files")
 
         args, _ = parser.parse_known_args()
         self.args               = args
@@ -79,15 +103,55 @@ class TSPipe():
         self.loss_fn            = loss_fn
         self.target_update_fn   = target_update_fn
         self.momentum           = momentum
-        self.tspipe_mode      = tspipe_mode
+        self.tspipe_mode        = tspipe_mode
         self.target_train_mode  = target_train_mode
         self.extra_args         = extra_args
         self.scatter_gather_fn  = scatter_gather_fn
+        
+        # Failover 시스템 초기화
+        self.failover_enabled = args.failover_enable
+        self.backup_gpu_ids = []
+        if args.backup_gpus:
+            self.backup_gpu_ids = [int(x.strip()) for x in args.backup_gpus.split(',')]
+        
+        self.gpu_health_monitor: Optional[GPUHealthMonitor] = None
+        self.process_health_monitor: Optional[ProcessHealthMonitor] = None
+        self.experiment_logger: Optional[FailoverExperimentLogger] = None
+        self.failed_workers: Dict[int, GpuWorker] = {}
+        self.original_partition_config = None
+        self.current_partition_config = None
+        self.failover_in_progress = False
+        
+        # 실험용 실패 시뮬레이션  
+        self.target_fail_gpu = args.target_fail_gpu
+        self.fail_after_batches = args.fail_after_batches
+        self.batch_count = 0
+        self.failure_simulated = False
+        self._emergency_shutdown_started = False
+        self.healthy_checkpoint_interval = max(0, args.healthy_checkpoint_interval)
+        self.checkpoint_benchmark_enabled = args.checkpoint_benchmark_enable
+        self.periodic_checkpoint_enabled = self.failover_enabled or self.checkpoint_benchmark_enabled
+
+        self.last_completed_step_time_ms: Optional[float] = None
+        self._pending_save_spike: Optional[Dict] = None
+        self._save_event_seq = 0
+        benchmark_prefix = args.checkpoint_benchmark_prefix.strip() if args.checkpoint_benchmark_prefix else "exp0_checkpoint"
+        artifact_dir = artifact_dir if artifact_dir else '.'
+        os.makedirs(artifact_dir, exist_ok=True)
+        self.step_metrics_file = f"{artifact_dir}/{benchmark_prefix}_step_metrics.jsonl"
+        self.save_events_file = f"{artifact_dir}/{benchmark_prefix}_save_events.jsonl"
+        
+        # 스케줄러 중단 플래그
+        self._shutdown_scheduler = False
         
         self.terminate_futures = [] # futures for termination tasks
 
         Log.i(f"====== TSPipe (v{tspipe.__version__}) Initializing =====")
         Log.i(f"Running on Python {python_version()}, PyTorch {torch.__version__}")
+        # Capture ports ONCE in the parent process so spawned children use the same values
+        self._nccl_port = PYTORCH_DISTRIBUTED_NCCL_PORT
+        self._rpc_port = PYTORCH_DISTRIBUTED_RPC_PORT
+        Log.i(f"Fixed ports: NCCL={self._nccl_port}, RPC={self._rpc_port}")
         with open(args.tspipe_config, 'r') as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)['tspipe']
         self.config['__artifact_dir'] = artifact_dir
@@ -119,12 +183,30 @@ class TSPipe():
 
         if self.target_update_fn is None:
             warnings.warn("Target update function is not designated. Target network will not be updated.")
+        
+        # Failover 시스템 초기화
+        if self.failover_enabled:
+            self._init_failover_system()
             
         # start gpu worker nodes
         self.gpu_workers: List[GpuWorker] = []
         for partition_id in range(self.rank * self.num_devices, (self.rank + 1) * self.num_devices):
             Log.v(f"Spawning worker with partition {partition_id}")
-            self.gpu_workers.append(self.spawn_new_gpu_workers(partition_id))
+            worker = self.spawn_new_gpu_workers(partition_id)
+            self.gpu_workers.append(worker)
+            
+            # 프로세스 건강 모니터링에 추가
+            if self.failover_enabled and self.process_health_monitor:
+                import psutil
+                try:
+                    process = psutil.Process(worker.process.pid)
+                    self.process_health_monitor.add_process(partition_id, process)
+                except Exception as e:
+                    Log.e(f"Failed to add process monitoring for partition {partition_id}: {e}")
+
+        # Failover 모니터링은 학습 시작 전에 즉시 활성화해야 워커 다운을 실시간 감지할 수 있음
+        if self.rank == 0 and self.failover_enabled:
+            self._start_failover_monitoring()
 
         # start pipeline for primary node (rank 0)
         if self.rank == 0:
@@ -132,6 +214,40 @@ class TSPipe():
             self.start_primary()
         else:
             self.join_workers()
+
+    def _append_jsonl(self, file_path: str, payload: Dict):
+        try:
+            with open(file_path, 'a') as f:
+                f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        except Exception as e:
+            Log.e(f"Failed to append jsonl to {file_path}: {e}")
+
+    def _record_step_metric(self, step_id: int, step_time_ms: float):
+        payload = {
+            'event_type': 'step_timing',
+            'timestamp_sec': time(),
+            'step_id': step_id,
+            'step_time_ms': step_time_ms,
+            'batch_count': self.batch_count,
+            'checkpoint_interval': self.healthy_checkpoint_interval
+        }
+        self._append_jsonl(self.step_metrics_file, payload)
+
+        if self._pending_save_spike is not None:
+            pre_ms = self._pending_save_spike.get('pre_step_time_ms')
+            spike_payload = {
+                'event_type': 'checkpoint_spike_observed',
+                'timestamp_sec': time(),
+                'save_event_id': self._pending_save_spike.get('save_event_id'),
+                'save_batch_count': self._pending_save_spike.get('batch_count'),
+                'pre_step_time_ms': pre_ms,
+                'post_step_time_ms': step_time_ms,
+                'delta_ms': (step_time_ms - pre_ms) if pre_ms is not None else None,
+                'ratio_post_over_pre': (step_time_ms / pre_ms) if pre_ms not in (None, 0) else None,
+                'post_step_id': step_id,
+            }
+            self._append_jsonl(self.save_events_file, spike_payload)
+            self._pending_save_spike = None
         
     def start_primary(self):
         """Initialize and start pipeline for the primary node."""
@@ -140,7 +256,8 @@ class TSPipe():
         self.highest_scheduled_batch_id: int = 0
         self.forward_complete_batch_idx: int = 0
         self.batch_dict: Dict[int, Tuple[List[Batch], List[Batch],List[Batch], List[Batch]]] = {}
-        self.comm = Communicator(None, CommunicatorParam(self.args.ip, self.total_world_size, rank=self.total_world_size-1))
+        self.comm = Communicator(None, CommunicatorParam(self.args.ip, self.total_world_size, rank=self.total_world_size-1,
+                                                              nccl_port=self._nccl_port, rpc_port=self._rpc_port))
         self.batch_q = BatchQueue()
         self.scheduled_momentum_update = {}
         self.scheduled_lr_update = {}
@@ -237,10 +354,569 @@ class TSPipe():
         # start pipeline
         self.start_pipeline()
 
+    def _init_failover_system(self):
+        """Failover 시스템 초기화"""
+        Log.i("🚨 Initializing GPU failover system...")
+        
+        # 실험 로거 초기화
+        experiment_name = self.args.failover_experiment or f"failover_experiment_{self.rank}"
+        self.experiment_logger = init_experiment_logger(experiment_name)
+        self.experiment_logger.start_metrics_collection(interval_seconds=2.0)
+        
+        # 원본 파티션 설정 저장
+        self.original_partition_config = {
+            'online': self.config['model_split']['online'].copy(),
+            'target': self.config['model_split']['target'].copy()
+        }
+        self.current_partition_config = deepcopy(self.original_partition_config)
+        
+        # GPU 헬스 모니터 초기화
+        experiment_log_file = self.experiment_logger.main_log_file if self.experiment_logger else None
+        self.gpu_health_monitor = GPUHealthMonitor(
+            failure_callback=self._on_gpu_failure,
+            check_interval=self.args.health_check_interval,
+            experiment_log_file=experiment_log_file
+        )
+        
+        # 프로세스 헬스 모니터 초기화
+        self.process_health_monitor = ProcessHealthMonitor(
+            process_failure_callback=self._on_process_failure
+        )
+        
+        Log.i("✅ Failover system initialized")
+        if self.experiment_logger:
+            self.experiment_logger.log_message("✅ Failover 시스템 초기화 완료", {
+                'backup_gpus': self.backup_gpu_ids,
+                'health_check_interval': self.args.health_check_interval,
+                'original_config': self.original_partition_config
+            })
+
+    def _start_failover_monitoring(self):
+        """Failover 모니터링 시작"""
+        if not self.failover_enabled:
+            return
+            
+        if self.gpu_health_monitor:
+            self.gpu_health_monitor.start_monitoring()
+            
+        if self.process_health_monitor:
+            self.process_health_monitor.start_monitoring()
+            
+        # 실험용 실패 시뮬레이션 스케줄링
+        if self.target_fail_gpu >= 0 and self.fail_after_batches > 0:
+            Log.w(f"💣 Scheduled failure simulation: GPU {self.target_fail_gpu} after {self.fail_after_batches} batches")
+            if self.experiment_logger:
+                self.experiment_logger.log_message("💣 실패 시뮬레이션 예약", {
+                    'target_gpu': self.target_fail_gpu,
+                    'fail_after_batches': self.fail_after_batches
+                })
+
+    def _on_gpu_failure(self, failure_event: GPUFailureEvent):
+        """GPU 실패 이벤트 핸들러"""
+        Log.e(f"💥 GPU {failure_event.gpu_id} failure detected! Type: {failure_event.failure_type}")
+        
+        if self.experiment_logger:
+            self.experiment_logger.log_failover_event(
+                'gpu_failure',
+                gpu_id=failure_event.gpu_id,
+                details={
+                    'failure_type': failure_event.failure_type,
+                    'timestamp': failure_event.timestamp.isoformat(),
+                    'error_msg': failure_event.error_msg
+                }
+            )
+        
+        # 🔥 CRITICAL: 장애 감지 즉시 전체 작업 강제 종료
+        Log.e(f"🛑 EMERGENCY SHUTDOWN: Terminating all processes due to GPU {failure_event.gpu_id} failure")
+        self._emergency_shutdown_and_failover(failure_event.gpu_id)
+
+    def _emergency_shutdown_and_failover(self, failed_gpu_id: int):
+        """긴급 종료 및 failover 프로세스 - 사용자 연구 목표에 맞는 구현"""
+        if self._emergency_shutdown_started:
+            Log.w("⚠️ Emergency shutdown already in progress, skipping duplicate trigger")
+            return
+        self._emergency_shutdown_started = True
+
+        Log.e("🚨 Starting emergency shutdown and failover process...")
+        
+        # 1. 현재 학습 루프 강제 중단
+        self._force_stop_current_training()
+        
+        # 2. 실패한 GPU worker 즉시 종료
+        self._terminate_failed_workers(failed_gpu_id)
+        
+        # 3. 분산 통신 환경 완전 정리 (Clean Shutdown)
+        self._cleanup_distributed_environment()
+        
+        # 4. 체크포인트 저장 (현재 상태 백업)
+        self._save_emergency_checkpoint()
+        
+        # 5. K-1 GPU로 재분할 계산 및 재시작 준비
+        self._prepare_k_minus_1_restart(failed_gpu_id)
+        
+        # 6. 프로세스 완전 종료 (재시작은 외부 스크립트가 담당)
+        import os
+        Log.e("💀 Process termination scheduled - external restart required")
+        os._exit(42)  # 모니터 스레드에서도 프로세스 전체 즉시 종료
+
+    def _cleanup_distributed_environment(self):
+        """분산 통신 환경 완전 정리 (Clean Shutdown)"""
+        try:
+            Log.e("🧹 Cleaning up distributed environment...")
+            
+            import torch.distributed as dist
+            import torch.distributed.rpc as rpc
+            
+            # 1. RPC 종료
+            if rpc.is_available():
+                try:
+                    Log.e("🔌 Shutting down RPC...")
+                    rpc.shutdown()
+                    Log.e("✅ RPC shutdown complete")
+                except Exception as e:
+                    Log.e(f"⚠️ RPC shutdown skipped: {e}")
+            
+            # 2. NCCL/Gloo 프로세스 그룹 종료
+            if dist.is_initialized():
+                try:
+                    Log.e("🔌 Destroying process groups...")
+                    dist.destroy_process_group() 
+                    Log.e("✅ Process groups destroyed")
+                except Exception as e:
+                    Log.e(f"⚠️ Process group destruction error: {e}")
+            
+            # 3. CUDA 컨텍스트 정리 
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+                    torch.cuda.synchronize()
+                    Log.e("✅ CUDA contexts cleaned")
+            except Exception as e:
+                Log.e(f"⚠️ CUDA cleanup error: {e}")
+                Log.e("🧹 Distributed environment cleanup completed")
+            
+            
+        except Exception as e:
+            Log.e(f"❌ Distributed cleanup failed: {e}")
+        
+    def _force_stop_current_training(self):
+        """현재 진행 중인 학습 루프 강제 중단"""
+        Log.w("⏹️ Forcing stop of current training loop...")
+        
+        # 스케줄러 스레드 중단
+        if hasattr(self, 'thread') and self.thread.is_alive():
+            # 스케줄링 중단 신호
+            self._shutdown_scheduler = True
+            
+        # 모든 GPU worker에게 즉시 중단 신호
+        for worker in self.gpu_workers:
+            try:
+                if hasattr(worker, 'process') and worker.process.is_alive():
+                    Log.w(f"🛑 Sending termination signal to worker {worker.partition_id}")
+                    worker.process.terminate()
+            except Exception as e:
+                Log.e(f"Error terminating worker: {e}")
+                
+    def _terminate_failed_workers(self, failed_gpu_id: int):
+        """실패한 GPU의 worker들 즉시 종료"""
+        Log.w(f"💀 Terminating workers on failed GPU {failed_gpu_id}")
+        failed_workers = self._find_workers_on_gpu(failed_gpu_id)
+        
+        for worker in failed_workers:
+            try:
+                Log.w(f"🔥 Force killing worker {worker.partition_id} on GPU {failed_gpu_id}")
+                if hasattr(worker, 'process'):
+                    worker.process.kill()  # terminate 대신 kill로 강제 종료
+                    worker.process.join(timeout=2)
+            except Exception as e:
+                Log.e(f"Error killing worker {worker.partition_id}: {e}")
+                
+    def _save_emergency_checkpoint(self):
+        """긴급 체크포인트 저장"""
+        try:
+            Log.w("💾 Saving emergency checkpoint...")
+            artifact_dir = self.config.get('__artifact_dir', '.')
+            os.makedirs(artifact_dir, exist_ok=True)
+            checkpoint_path = f"{artifact_dir}/emergency_checkpoint.pth"
+            # 현재 모델 상태 저장
+            if hasattr(self, 'online_partition'):
+                torch.save(self.online_partition.state_dict(), checkpoint_path)
+                Log.i(f"✅ Emergency checkpoint saved to {checkpoint_path}")
+            elif self.module_online is not None:
+                torch.save(self.module_online.state_dict(), checkpoint_path)
+                Log.i(f"✅ Emergency checkpoint saved from module_online to {checkpoint_path}")
+            else:
+                Log.w("⚠️ No online model found; skipping checkpoint save")
+        except Exception as e:
+            Log.e(f"❌ Failed to save emergency checkpoint: {e}")
+
+    def _save_healthy_checkpoint(self):
+        """정상 구간의 롤백용 체크포인트 저장"""
+        try:
+            artifact_dir = self.config.get('__artifact_dir', '.')
+            os.makedirs(artifact_dir, exist_ok=True)
+            checkpoint_path = f"{artifact_dir}/healthy_checkpoint_latest.pth"
+
+            if self.module_online is not None:
+                save_start = time()
+                torch.save({
+                    'model_state_dict': self.module_online.state_dict(),
+                    'batch_count': self.batch_count,
+                    'save_timestamp': save_start,
+                }, checkpoint_path)
+                save_duration_sec = time() - save_start
+                file_size_bytes = os.path.getsize(checkpoint_path) if os.path.exists(checkpoint_path) else None
+                self._save_event_seq += 1
+                save_event = {
+                    'event_type': 'checkpoint_save',
+                    'timestamp_sec': time(),
+                    'save_event_id': self._save_event_seq,
+                    'batch_count': self.batch_count,
+                    'checkpoint_interval': self.healthy_checkpoint_interval,
+                    'checkpoint_path': checkpoint_path,
+                    'save_duration_sec': save_duration_sec,
+                    'file_size_bytes': file_size_bytes,
+                    'pre_step_time_ms': self.last_completed_step_time_ms,
+                }
+                self._append_jsonl(self.save_events_file, save_event)
+                self._pending_save_spike = {
+                    'save_event_id': self._save_event_seq,
+                    'batch_count': self.batch_count,
+                    'pre_step_time_ms': self.last_completed_step_time_ms,
+                }
+                Log.i(f"✅ Healthy checkpoint saved: {checkpoint_path}")
+        except Exception as e:
+            Log.e(f"❌ Failed to save healthy checkpoint: {e}")
+            
+    def _prepare_k_minus_1_restart(self, failed_gpu_id: int):
+        """K-1 GPU 재분할 정보 준비"""
+        Log.w(f"📋 Preparing K-1 GPU restart configuration (excluding GPU {failed_gpu_id})")
+        
+        try:
+            # 사용 가능한 GPU 목록 (실패한 GPU 제외)
+            available_gpus = [i for i in range(torch.cuda.device_count()) if i != failed_gpu_id]
+            
+            Log.i(f"📊 Available GPUs for restart: {available_gpus}")
+            Log.i(f"📊 Original partition config: {self.original_partition_config}")
+            
+            # 재시작 정보를 파일로 저장
+            restart_config = {
+                'failed_gpu': failed_gpu_id,
+                'available_gpus': available_gpus,
+                'original_config': self.original_partition_config,
+                'checkpoint_path': f"{self.config.get('__artifact_dir', '.')}/healthy_checkpoint_latest.pth",
+                'emergency_checkpoint_path': f"{self.config.get('__artifact_dir', '.')}/emergency_checkpoint.pth",
+                'failover_timestamp': time()
+            }
+            
+            import json
+            artifact_dir = self.config.get('__artifact_dir', '.')
+            os.makedirs(artifact_dir, exist_ok=True)
+            restart_config_path = f"{artifact_dir}/restart_config.json" 
+            with open(restart_config_path, 'w') as f:
+                json.dump(restart_config, f, indent=2)
+                
+            Log.i(f"✅ Restart configuration saved to {restart_config_path}")
+            
+        except Exception as e:
+            Log.e(f"❌ Failed to prepare restart configuration: {e}")
+
+        # Failover 처리 시작 (기존 로직은 백업용으로 유지)
+        # self._handle_gpu_failure(failure_event.gpu_id)
+
+    def _on_process_failure(self, partition_id: int, failure_reason: str):
+        """프로세스 실패 이벤트 핸들러"""
+        Log.e(f"💀 Process for partition {partition_id} failed: {failure_reason}")
+
+        failed_gpu_id = None
+        for worker in self.gpu_workers:
+            if worker.partition_id == partition_id:
+                failed_gpu_id = worker.device_id
+                break
+        if failed_gpu_id is None:
+            failed_gpu_id = partition_id % max(1, self.num_devices)
+        
+        if self.experiment_logger:
+            self.experiment_logger.log_failover_event(
+                'gpu_failure',
+                gpu_id=failed_gpu_id,
+                partition_id=partition_id,
+                details={
+                    'failure_reason': failure_reason,
+                    'source': 'process_health_monitor'
+                }
+            )
+
+        Log.e(f"🛑 Escalating process failure to emergency shutdown (gpu={failed_gpu_id})")
+        self._emergency_shutdown_and_failover(failed_gpu_id)
+
+    def _handle_gpu_failure(self, failed_gpu_id: int):
+        """GPU 실패 처리 및 복구"""
+        if self.failover_in_progress:
+            Log.w("Failover already in progress, skipping...")
+            return
+            
+        self.failover_in_progress = True
+        recovery_start_time = time()
+        
+        try:
+            Log.i(f"🔄 Starting failover process for GPU {failed_gpu_id}")
+            
+            if self.experiment_logger:
+                self.experiment_logger.log_failover_event('recovery_start', gpu_id=failed_gpu_id)
+            
+            # 1. 실패한 worker 식별 및 중지
+            failed_workers = self._find_workers_on_gpu(failed_gpu_id)
+            for worker in failed_workers:
+                self._terminate_worker(worker)
+                self.failed_workers[worker.partition_id] = worker
+            
+            # 2. 백업 GPU가 있으면 해당 GPU로 재시작
+            if self.backup_gpu_ids:
+                backup_gpu = self.backup_gpu_ids.pop(0)
+                Log.i(f"🔀 Using backup GPU {backup_gpu} for recovery")
+                
+                for worker in failed_workers:
+                    self._restart_worker_on_gpu(worker.partition_id, backup_gpu)
+                    
+            else:
+                # 3. 남은 GPU들로 시스템 재구성
+                Log.i("🔀 Reconfiguring system with remaining GPUs")
+                self._reconfigure_with_remaining_gpus()
+            
+            recovery_time_ms = (time() - recovery_start_time) * 1000
+            
+            Log.i(f"✅ Failover recovery completed in {recovery_time_ms:.2f}ms")
+            
+            if self.experiment_logger:
+                self.experiment_logger.log_failover_event(
+                    'recovery_complete', 
+                    gpu_id=failed_gpu_id,
+                    recovery_time_ms=recovery_time_ms,
+                    new_config=self.current_partition_config
+                )
+                
+        except Exception as e:
+            Log.e(f"❌ Failover recovery failed: {e}")
+            if self.experiment_logger:
+                self.experiment_logger.log_message("❌ Failover 복구 실패", {'error': str(e)})
+        finally:
+            self.failover_in_progress = False
+
+    def _find_workers_on_gpu(self, gpu_id: int) -> List[GpuWorker]:
+        """특정 GPU에서 실행 중인 worker들 찾기"""
+        failed_workers = []
+        for worker in self.gpu_workers:
+            if hasattr(worker, 'device_id') and worker.device_id == gpu_id:
+                failed_workers.append(worker)
+        return failed_workers
+
+    def _terminate_worker(self, worker: GpuWorker):
+        """Worker 프로세스 안전하게 종료"""
+        try:
+            Log.i(f"🛑 Terminating worker for partition {worker.partition_id}")
+            
+            # 현재 작업 완료 대기 (타임아웃 포함)
+            self._wait_for_worker_completion(worker, timeout_seconds=10)
+            
+            # 프로세스 종료
+            if hasattr(worker, 'process') and worker.process.is_alive():
+                worker.process.terminate()
+                worker.process.join(timeout=5)
+                
+                if worker.process.is_alive():
+                    worker.process.kill()
+                    worker.process.join()
+                    
+            Log.i(f"✅ Worker for partition {worker.partition_id} terminated")
+            
+        except Exception as e:
+            Log.e(f"Error terminating worker {worker.partition_id}: {e}")
+
+    def _wait_for_worker_completion(self, worker: GpuWorker, timeout_seconds: int = 10):
+        """Worker의 현재 작업 완료 대기"""
+        # TODO: 실제 작업 완료 시그널 구현
+        Log.d(f"Waiting for worker {worker.partition_id} completion...")
+        sleep(2)  # 임시 대기
+
+    def _restart_worker_on_gpu(self, partition_id: int, new_gpu_id: int):
+        """새로운 GPU에서 worker 재시작"""
+        Log.i(f"🚀 Restarting worker for partition {partition_id} on GPU {new_gpu_id}")
+        
+        # 새로운 worker 생성
+        new_worker = self.spawn_new_gpu_workers(partition_id)  # TODO: GPU ID 지정 가능하도록 수정 필요
+        
+        # 기존 worker 교체
+        for i, worker in enumerate(self.gpu_workers):
+            if worker.partition_id == partition_id:
+                self.gpu_workers[i] = new_worker
+                break
+        else:
+            self.gpu_workers.append(new_worker)
+            
+        Log.i(f"✅ Worker restarted for partition {partition_id}")
+        
+        if self.experiment_logger:
+            self.experiment_logger.log_failover_event(
+                'worker_restart',
+                partition_id=partition_id,
+                details={'new_gpu_id': new_gpu_id}
+            )
+
+    def _reconfigure_with_remaining_gpus(self):
+        """남은 GPU들로 시스템 재구성"""
+        # 살아있는 GPU 목록 확인
+        healthy_gpus = []
+        if self.gpu_health_monitor:
+            healthy_gpus = self.gpu_health_monitor.get_healthy_gpus()
+        else:
+            healthy_gpus = list(range(torch.cuda.device_count()))
+        
+        Log.i(f"🔀 Reconfiguring with {len(healthy_gpus)} healthy GPUs: {healthy_gpus}")
+        
+        # 새로운 파티션 설정 계산
+        new_config = self._calculate_new_partition_config(len(healthy_gpus))
+        
+        if new_config:
+            self.current_partition_config = new_config
+            Log.i("✅ System reconfigured successfully")
+            
+            if self.experiment_logger:
+                self.experiment_logger.log_failover_event(
+                    'repartition',
+                    old_config=self.original_partition_config,
+                    new_config=new_config,
+                    details={'healthy_gpus': healthy_gpus}
+                )
+                self.experiment_logger.update_config(new_config)
+        else:
+            Log.e("❌ Failed to calculate new partition configuration")
+
+    def _calculate_new_partition_config(self, num_healthy_gpus: int) -> Optional[Dict]:
+        """남은 GPU 수에 맞는 새로운 파티션 설정 계산"""
+        if num_healthy_gpus <= 0:
+            return None
+        
+        # 간단한 균등 분할 전략 (더 정교한 DP 알고리즘으로 대체 가능)
+        original_online = self.original_partition_config['online']
+        original_target = self.original_partition_config['target']
+        
+        total_online_layers = sum(original_online)
+        total_target_layers = sum(original_target)
+        
+        # 균등 분할
+        online_per_gpu = total_online_layers // num_healthy_gpus
+        target_per_gpu = total_target_layers // num_healthy_gpus
+        
+        new_online = [online_per_gpu] * num_healthy_gpus
+        new_target = [target_per_gpu] * num_healthy_gpus
+        
+        # 나머지 레이어들을 마지막 GPU에 할당
+        remaining_online = total_online_layers - sum(new_online)
+        remaining_target = total_target_layers - sum(new_target)
+        
+        if remaining_online > 0:
+            new_online[-1] += remaining_online
+        if remaining_target > 0:
+            new_target[-1] += remaining_target
+        
+        return {
+            'online': new_online,
+            'target': new_target
+        }
+
+    def _restart_failed_worker(self, partition_id: int):
+        """실패한 worker 재시작"""
+        Log.i(f"🔄 Restarting failed worker for partition {partition_id}")
+        
+        # 기존 worker 찾기 및 제거
+        failed_worker = None
+        for i, worker in enumerate(self.gpu_workers):
+            if worker.partition_id == partition_id:
+                failed_worker = worker
+                del self.gpu_workers[i]
+                break
+        
+        if failed_worker:
+            # 새로운 worker 생성
+            new_worker = self.spawn_new_gpu_workers(partition_id)
+            self.gpu_workers.append(new_worker)
+            
+            Log.i(f"✅ Worker restarted for partition {partition_id}")
+
+    def _simulate_gpu_failure_if_scheduled(self):
+        """예약된 GPU 실패 시뮬레이션 실행"""
+        # 디버깅을 위한 상세 로깅
+        if self.batch_count % 5 == 0:  # 5배치마다 상태 로깅
+            Log.i(f"🔍 Failure simulation check: batch_count={self.batch_count}, target_fail_gpu={self.target_fail_gpu}, fail_after_batches={self.fail_after_batches}, failure_simulated={self.failure_simulated}, gpu_health_monitor={'exists' if self.gpu_health_monitor else 'None'}")
+        
+        if (self.target_fail_gpu >= 0 and 
+            self.batch_count >= self.fail_after_batches and 
+            not self.failure_simulated and
+            self.gpu_health_monitor):
+            
+            Log.w(f"💣 Simulating GPU {self.target_fail_gpu} failure after {self.batch_count} batches")
+            
+            success = self.gpu_health_monitor.force_gpu_failure(
+                self.target_fail_gpu, 
+                failure_type="scheduled_simulation"
+            )
+            
+            if success:
+                self.failure_simulated = True
+                Log.w(f"✅ GPU {self.target_fail_gpu} failure simulation marked successful")
+                if self.experiment_logger:
+                    self.experiment_logger.log_message("💣 GPU 실패 시뮬레이션 실행", {
+                        'gpu_id': self.target_fail_gpu,
+                        'batch_count': self.batch_count
+                    })
+            else:
+                Log.e(f"❌ GPU {self.target_fail_gpu} failure simulation failed")
+        elif self.batch_count >= self.fail_after_batches:
+            # 조건이 안 맞는 이유를 로깅
+            reasons = []
+            if self.target_fail_gpu < 0:
+                reasons.append(f"target_fail_gpu={self.target_fail_gpu}")
+            if self.failure_simulated:
+                reasons.append("already_simulated")
+            if not self.gpu_health_monitor:
+                reasons.append("no_health_monitor")
+            if reasons:
+                Log.w(f"🚫 Failure simulation skipped at batch {self.batch_count}: {', '.join(reasons)}")
+
+    def cleanup_failover_system(self):
+        """Failover 시스템 정리"""
+        if not self.failover_enabled:
+            return
+            
+        Log.i("🧹 Cleaning up failover system...")
+        
+        if self.gpu_health_monitor:
+            self.gpu_health_monitor.stop_monitoring()
+            
+        if self.process_health_monitor:
+            self.process_health_monitor.stop_monitoring()
+            
+        if self.experiment_logger:
+            result_dir = finalize_experiment_logger()
+            Log.i(f"📊 Experiment results saved to: {result_dir}")
+            
+        Log.i("✅ Failover system cleanup completed")
+
     def join_workers(self):
         Log.i("Waiting until workers finish their jobs...")
+        
+        # Failover 모니터링 시작 (primary node에서만)
+        if self.rank == 0 and self.failover_enabled:
+            self._start_failover_monitoring()
+        
         for worker in self.gpu_workers:
             worker.process.join()
+            
+        # Failover 시스템 정리
+        if self.rank == 0:
+            self.cleanup_failover_system()
 
     @property
     def is_primary(self):
@@ -251,7 +927,8 @@ class TSPipe():
         return GpuWorker(partition_id,
                          self.num_ubatches,
                          self.num_bwd_ubatches,
-                         CommunicatorParam(self.args.ip, self.total_world_size, partition_id), 
+                         CommunicatorParam(self.args.ip, self.total_world_size, partition_id,
+                                           nccl_port=self._nccl_port, rpc_port=self._rpc_port), 
                          self.optimizer, 
                          self.momentum,
                          self.loss_fn,
@@ -266,6 +943,12 @@ class TSPipe():
         epoch = 0
 
         for schedules in self.task_scheduler.schedule_generator(): # 한 사이클의 작업들 리스트가 training 끝날 때까지 무한생성
+            # 🔥 긴급 중단 체크
+            if self._shutdown_scheduler:
+                Log.e("[SCHEDULER] 🛑 Emergency shutdown flag detected. Stopping scheduler immediately.")
+                self.running = PipelineRunState.STOPPED
+                return
+                
             if len(set_terminated_partition) == self.num_partitions:
                 print("[SCHEDULER] Termination signal is sent to all partitions. Stopping scheduler loop.")
                 self.running = PipelineRunState.STOPPED
@@ -377,6 +1060,17 @@ class TSPipe():
 
     def schedule_task(self, gpu_task: GpuTask):
         self.highest_scheduled_batch_id = max(self.highest_scheduled_batch_id, gpu_task.batch_id)
+        
+        if gpu_task.task_type == TaskType.TASK_FEED_BATCH:
+            self.batch_count += 1
+            if self.periodic_checkpoint_enabled and self.healthy_checkpoint_interval > 0 and self.batch_count % self.healthy_checkpoint_interval == 0:
+                self._save_healthy_checkpoint()
+            if self.failover_enabled:
+                try:
+                    self._simulate_gpu_failure_if_scheduled()
+                except Exception as e:
+                    Log.e(f"Error in failure simulation check: {e}")
+        
         if gpu_task.task_type == TaskType.TASK_TERMINATE:
             if gpu_task.partition_id is not None and gpu_task.partition_id >= 0:
                 future = self.comm.send(f'task_{gpu_task.partition_id}', gpu_task)
@@ -447,6 +1141,8 @@ class TSPipe():
             batches_1 = self.scatter_gather_fn.scatter(view_m1.tensor_or_tensors, self.num_ubatches)
             batches_2 = self.scatter_gather_fn.scatter(view_m2.tensor_or_tensors, self.num_ubatches)
 
+            step_start = time()
+
             bid = self.batch_q.next_id
             with Operation('feed_api', batch_idx=bid):
                 if self.tspipe_mode == TSPipeMode.SELF_SUPERVISED_MOMENTUM:
@@ -465,6 +1161,12 @@ class TSPipe():
                 self.last_batch_idx = batch_idx
                 self.schedule_task(GpuTask(TaskType.TASK_FEED_BATCH, batch_idx, 0, 0, 0, 0, batch_list=batches_lists, asymmetric=asymmetric, label_batch=batch_view_target))
             loss = self.wait_forward()
+            step_time_ms = (time() - step_start) * 1000.0
+            if loss is not None:
+                completed_step_id = self.forward_complete_batch_idx
+                self.last_completed_step_time_ms = step_time_ms
+                if self.checkpoint_benchmark_enabled:
+                    self._record_step_metric(completed_step_id, step_time_ms)
 
         # loss may be None for first few initial iterations
         return loss
