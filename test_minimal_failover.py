@@ -67,9 +67,9 @@ def run_regression_scenario() -> None:
     print(f"  partition_after ={after_replan}")
     assert before_replan != after_replan, "Expected partition change after REPLAN"
 
-    print("[4] Severe slowdown -> DEGRADE expected + slow GPU exclusion")
+    print("[4] GPU failure -> DEGRADE expected + failed GPU exclusion")
     optimizer.ingest_runtime_timing_batch({1: {"compute_time": 5.0, "comm_time": 1.0}}, ema=0.9)
-    policy_degrade = optimizer.evaluate_slowdown_and_decide(gpu_id=1, current_slowdown=3.00)
+    policy_degrade = optimizer.evaluate_slowdown_and_decide(gpu_id=1, current_slowdown=3.00, failed_gpus=[1])
     print(f"  policy={policy_degrade}")
     assert policy_degrade == "DEGRADE", f"Expected DEGRADE, got {policy_degrade}"
     optimizer.execute_policy(policy_degrade, gpu_id=1, current_slowdown=3.00)

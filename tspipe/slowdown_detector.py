@@ -27,8 +27,8 @@ class SlowdownDetector:
     """Stage time 기반 GPU slowdown 탐지"""
     
     def __init__(self, 
-                 baseline_window: int = 20,
-                 detection_window: int = 10,
+                 baseline_window: int = 10,
+                 detection_window: int = 5,
                  slowdown_threshold: float = 1.05):
         """
         Args:

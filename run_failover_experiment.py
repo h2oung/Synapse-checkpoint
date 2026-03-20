@@ -27,6 +27,11 @@ from tspipe.failover_logger import init_experiment_logger, finalize_experiment_l
 from tspipe.gpu_health_monitor import GPUHealthMonitor
 from gpu_auto_allocator import suggest_gpu_allocation, print_allocation_summary, find_available_gpus
 
+
+# 이 실험 스크립트에서 사용할 물리 GPU 집합을 고정
+PINNED_GPU_SET = [0, 3, 4, 6]
+PINNED_GPU_ENV = ",".join(str(g) for g in PINNED_GPU_SET)
+
 class FailoverExperiment:
     """Failover 실험 관리 클래스"""
     
@@ -258,12 +263,12 @@ class FailoverExperiment:
             "python", "train_kd_profiling.py",
             "--img_root=/nas-ssd/datasets/imagenet2012/imagenet",
             "--save_root=./results/failover_test/",
-            "--t_model=./results/base/base-i100-vit-base/teacher_init_vit_base.pth.tar",
-            "--s_init=./results/base/base-i100-resnet50/student_init_resnet50.pth.tar",
+            "--t_model=./results/base/base-i100-vit-large/model_best.pth.tar",
+            "--s_init=./results/base/base-i100-resnet152/initial_r152.pth.tar",
             "--kd_mode=st",
             "--lambda_kd=0.1",
-            "--t_name=vit_base",
-            "--s_name=resnet50",
+            "--t_name=vit_large",
+            "--s_name=resnet152",
             "--T=4.0",
             "--data_name=imagenet100",
             "--num_class=100",
@@ -276,6 +281,7 @@ class FailoverExperiment:
             "--epochs=1",  # 실험용으로 짧게 설정
             "--max_step_profiling=10",  # 20 -> 10으로 축소
             "--note=failover-experiment",
+            "--soft-failover-enable",
             # Failover 관련 옵션들
             "--failover-enable",
             "--failover-experiment", self.experiment_name,
@@ -290,7 +296,13 @@ class FailoverExperiment:
             
         if self.args.verbose:
             print(f"🔧 TSPipe 명령어: {' '.join(cmd)}")
-        
+
+        # 이 실험에서는 GPU 0,3,4,6만 보이도록 CUDA_VISIBLE_DEVICES를 고정
+        env = os.environ.copy()
+        env['CUDA_VISIBLE_DEVICES'] = PINNED_GPU_ENV
+        if self.args.verbose:
+            print(f"🎯 CUDA_VISIBLE_DEVICES={env['CUDA_VISIBLE_DEVICES']}")
+
         # 프로세스 시작
         self.experiment_start_time = time.time()
         self.tspipe_process = subprocess.Popen(
@@ -300,7 +312,7 @@ class FailoverExperiment:
             stderr=subprocess.PIPE,
             universal_newlines=True,
             bufsize=1,
-            env=os.environ.copy()
+            env=env
         )
         
         # 로그 모니터링 시작
@@ -577,9 +589,16 @@ class FailoverExperiment:
 
     def _restart_from_failover_config_if_available(self):
         """TSPipe가 실패 종료된 경우 restart_config 기반 K-1 재시작"""
-        restart_config_path = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/results/failover_test/failover-experiment/restart_config.json")
-        if not restart_config_path.exists():
-            print("⚠️ restart_config.json이 없어 K-1 재시작을 건너뜁니다.")
+        restart_dir = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/results/failover_test/failover-experiment")
+        emergency_path = restart_dir / "emergency_restart_config.json"
+        legacy_path = restart_dir / "restart_config.json"
+
+        if emergency_path.exists():
+            restart_config_path = emergency_path
+        elif legacy_path.exists():
+            restart_config_path = legacy_path
+        else:
+            print("⚠️ emergency_restart_config.json/restart_config.json이 없어 K-1 재시작을 건너뜁니다.")
             return
 
         try:
@@ -587,20 +606,49 @@ class FailoverExperiment:
                 restart_config = json.load(f)
 
             failed_gpu = restart_config.get('failed_gpu')
+            partition = restart_config.get('partition', {})
             original = restart_config.get('original_config', {})
             original_online = original.get('online', [])
             original_target = original.get('target', [])
 
-            if not original_online or not original_target:
-                print("⚠️ restart_config에 원본 분할 정보가 없어 재시작 불가")
-                return
+            use_partition_payload = (
+                isinstance(partition, dict)
+                and isinstance(partition.get('snet_partition'), list)
+                and isinstance(partition.get('tnet_partition'), list)
+                and isinstance(partition.get('gpu_assignment'), list)
+            )
 
-            if failed_gpu is None or failed_gpu < 0 or failed_gpu >= len(original_online):
-                print("⚠️ failed_gpu 값이 유효하지 않아 재시작 불가")
-                return
+            checkpoint_path = restart_config.get('checkpoint_path') or restart_config.get('emergency_checkpoint_path')
 
-            new_online = [v for i, v in enumerate(original_online) if i != failed_gpu]
-            new_target = [v for i, v in enumerate(original_target) if i != failed_gpu]
+            if use_partition_payload:
+                # Prefer DP-repartitioned K-1 config generated during hard failover.
+                new_online = [int(v) for v in partition.get('snet_partition', [])]
+                new_target = [int(v) for v in partition.get('tnet_partition', [])]
+                visible_devices = [str(int(g)) for g in partition.get('gpu_assignment', [])]
+                config_source = 'partition_payload'
+            else:
+                # Backward compatibility: derive K-1 split by removing failed GPU index.
+                if not original_online or not original_target:
+                    print("⚠️ restart_config에 원본 분할 정보가 없어 재시작 불가")
+                    return
+                if failed_gpu is None or failed_gpu < 0 or failed_gpu >= len(original_online):
+                    print("⚠️ failed_gpu 값이 유효하지 않아 재시작 불가")
+                    return
+
+                new_online = [v for i, v in enumerate(original_online) if i != failed_gpu]
+                new_target = [v for i, v in enumerate(original_target) if i != failed_gpu]
+                visible_devices = [str(i) for i in range(len(original_online)) if i != failed_gpu]
+                config_source = 'legacy_failed_gpu'
+
+            if not new_online or not new_target:
+                print("⚠️ 계산된 재시작 분할이 비어 있어 재시작 불가")
+                return
+            if len(new_online) != len(new_target):
+                print("⚠️ online/target 분할 길이가 달라 재시작 불가")
+                return
+            if not visible_devices:
+                print("⚠️ 사용할 CUDA_VISIBLE_DEVICES가 비어 있어 재시작 불가")
+                return
 
             base_cfg_path = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/tspipe.yaml")
             with open(base_cfg_path, 'r') as f:
@@ -608,16 +656,25 @@ class FailoverExperiment:
 
             cfg['tspipe']['model_split']['online'] = new_online
             cfg['tspipe']['model_split']['target'] = new_target
+            cfg['tspipe']['hard_failover_restart'] = {
+                'source_config': str(restart_config_path),
+                'source_type': restart_config.get('restart_type', 'legacy'),
+                'config_source': config_source,
+                'failed_gpu': failed_gpu,
+                'visible_devices': visible_devices,
+            }
 
             restart_cfg_path = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/tspipe_restart_kminus1.yaml")
             with open(restart_cfg_path, 'w') as f:
                 yaml.safe_dump(cfg, f, sort_keys=False)
 
-            visible_devices = [str(i) for i in range(len(original_online)) if i != failed_gpu]
             cuda_visible = ",".join(visible_devices)
 
-            print(f"🔄 K-1 재시작 시도: failed_gpu={failed_gpu}, CUDA_VISIBLE_DEVICES={cuda_visible}")
-            self._start_tspipe_with_custom_config(str(restart_cfg_path), cuda_visible)
+            print(
+                f"🔄 K-1 재시작 시도: failed_gpu={failed_gpu}, "
+                f"source={config_source}, CUDA_VISIBLE_DEVICES={cuda_visible}"
+            )
+            self._start_tspipe_with_custom_config(str(restart_cfg_path), cuda_visible, checkpoint_path)
             self.restarted = True
 
             self.logger.log_message("🔄 K-1 재시작 실행", {
@@ -625,6 +682,8 @@ class FailoverExperiment:
                 'new_online': new_online,
                 'new_target': new_target,
                 'cuda_visible_devices': cuda_visible,
+                'config_source': config_source,
+                'restart_payload_path': str(restart_config_path),
                 'restart_config_path': str(restart_cfg_path)
             })
 
@@ -634,8 +693,12 @@ class FailoverExperiment:
             print(f"❌ K-1 재시작 실패: {e}")
             self.logger.log_message("❌ K-1 재시작 실패", {'error': str(e)})
 
-    def _start_tspipe_with_custom_config(self, config_path: str, cuda_visible_devices: str):
-        """커스텀 tspipe config/CUDA 환경으로 재시작"""
+    def _start_tspipe_with_custom_config(self, config_path: str, cuda_visible_devices: str, resume_checkpoint: Optional[str] = None):
+        """커스텀 tspipe config/CUDA 환경으로 재시작
+
+        cuda_visible_devices 인자는 restart_config에서 가져온 논리 K-1 GPU 집합이지만,
+        실제 물리 GPU 집합은 PINNED_GPU_SET (0,3,4,6)으로 고정한다.
+        """
         benchmark_dir = "/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target"
         cmd = [
             "python", "train_kd_profiling.py",
@@ -658,14 +721,20 @@ class FailoverExperiment:
             "--ip=localhost",
             "--epochs=1",
             "--max_step_profiling=10",
-            "--note=failover-restart-kminus1"
+            "--note=failover-restart-kminus1",
+            "--soft-failover-enable",
         ]
 
+        if resume_checkpoint:
+            cmd.append(f"--resume-checkpoint={resume_checkpoint}")
+
         env = os.environ.copy()
-        env['CUDA_VISIBLE_DEVICES'] = cuda_visible_devices
+        # 재시작 시에도 물리 GPU 0,3,4,6만 보이도록 고정
+        env['CUDA_VISIBLE_DEVICES'] = PINNED_GPU_ENV
 
         if self.args.verbose:
             print(f"🔧 K-1 재시작 명령어: {' '.join(cmd)}")
+            print(f"🎯 CUDA_VISIBLE_DEVICES={env['CUDA_VISIBLE_DEVICES']}")
 
         self.tspipe_process = subprocess.Popen(
             cmd,

@@ -106,10 +106,25 @@ class StageTimePredictor:
         available_gpus = [gpu.gpu_id for gpu in gpu_states if not gpu.is_failed]
         T_replan = self._calculate_replan_stage_time(available_gpus, alpha_g, beta_g)
         
-        # 3. DEGRADE: 장애 GPU 제외하고 K-1개 GPU로 재분할  
+        # 3. DEGRADE: 장애 GPU + 가장 느린 GPU 하나 제외하고 재분할
+        # ✅ Fix #2 (Step 2): ETA 계산이 실행과 동일한 GPU 집합(가장 느린 GPU 하나만 제외)을 사용
         failed_gpus = [gpu.gpu_id for gpu in gpu_states if gpu.is_failed]
-        healthy_gpus = [gpu.gpu_id for gpu in gpu_states if not gpu.is_failed and gpu.current_slowdown < 1.5]
-        T_degrade = self._calculate_degrade_stage_time(healthy_gpus, alpha_g, beta_g)
+        
+        # 가장 느린 GPU를 명시적으로 찾음 (identify_slow_gpu()와 동일 기준)
+        affected_slow_gpu = None
+        max_slowdown = 1.0
+        for gpu in gpu_states:
+            if gpu.current_slowdown > max_slowdown:
+                max_slowdown = gpu.current_slowdown
+                affected_slow_gpu = gpu.gpu_id
+        
+        # DEGRADE는 failed GPU와 affected slow GPU(가장 느린 것)를 제외한 GPU들로 계산
+        degrade_gpus = [
+            gpu.gpu_id
+            for gpu in gpu_states
+            if not gpu.is_failed and gpu.gpu_id != affected_slow_gpu
+        ]
+        T_degrade = self._calculate_degrade_stage_time(degrade_gpus, alpha_g, beta_g)
         
         self.logger.info(f"⏱️  Stage Time Prediction: KEEP={T_keep:.3f}s, REPLAN={T_replan:.3f}s, DEGRADE={T_degrade:.3f}s")
         
@@ -137,35 +152,44 @@ class StageTimePredictor:
                                   partition: PartitionConfig,
                                   alpha_g: Dict[int, float],
                                   beta_g: Dict[int, float]) -> float:
-        """KEEP 정책: 현재 분할에서 slowdown 적용"""
+        """KEEP 정책: 현재 분할 유지, α/β가 이미 slowdown ratio를 인코딩하므로 추가 곱셈 없음."""
         stage_times = []
         
-        # 각 stage별로 stage time 계산
         snet_start = 0
         tnet_start = 0
         
         for stage_idx, gpu_id in enumerate(partition.gpu_assignment):
             gpu_state = next((g for g in gpu_states if g.gpu_id == gpu_id), None)
             if gpu_state is None:
-                continue
+                return float('inf')
+            if gpu_state.is_failed:
+                # KEEP cannot be valid if current partition includes a failed GPU.
+                return float('inf')
                 
-            # SNet stage time 계산
             snet_layers = partition.snet_partition[stage_idx]
             snet_end = snet_start + snet_layers
-            snet_time = self._get_snet_stage_time(snet_start, snet_end-1, gpu_id, alpha_g, beta_g)
+            # _get_*_stage_time 내부에서 alpha_g × compute + beta_g × comm 적용됨
+            # α/β = current/baseline 이므로 추가 slowdown 곱셈 금지 (double-apply 방지)
+            snet_time = self._get_snet_stage_time(snet_start, snet_end - 1, gpu_id, alpha_g, beta_g)
             
-            # TNet stage time 계산  
             tnet_layers = partition.tnet_partition[stage_idx]
             tnet_end = tnet_start + tnet_layers
-            tnet_time = self._get_tnet_stage_time(tnet_start, tnet_end-1, gpu_id, alpha_g, beta_g)
+            tnet_time = self._get_tnet_stage_time(tnet_start, tnet_end - 1, gpu_id, alpha_g, beta_g)
             
-            # slowdown 적용
-            stage_time = max(snet_time, tnet_time) * gpu_state.current_slowdown
-            stage_times.append(stage_time)
+            stage_times.append(max(snet_time, tnet_time))
             
             snet_start = snet_end
             tnet_start = tnet_end
-            
+
+        # 파티션 경계가 실제 layer 수와 일치하는지 검증
+        if snet_start != self.snet_num_layers or tnet_start != self.tnet_num_layers:
+            self.logger.warning(
+                f"KEEP partition boundary mismatch: "
+                f"snet {snet_start}/{self.snet_num_layers}, "
+                f"tnet {tnet_start}/{self.tnet_num_layers}"
+            )
+            return float('inf')
+
         return max(stage_times) if stage_times else float('inf')
     
     def _calculate_replan_stage_time(self, 
@@ -182,11 +206,15 @@ class StageTimePredictor:
                                     healthy_gpus: List[int],
                                     alpha_g: Dict[int, float],
                                     beta_g: Dict[int, float]) -> float:
-        """DEGRADE 정책: 건강한 GPU만 사용하여 DP 기반 재분할"""
+        """DEGRADE 정책: 장애 GPU 제외 후 재-profiling 가정 → 건강한 GPU α=β=1.0으로 초기화"""
         if not healthy_gpus:
             return float('inf')
 
-        return self._calculate_replan_stage_time(healthy_gpus, alpha_g, beta_g)
+        # DEGRADE는 남은 GPU에 대한 재-profiling을 수행하므로
+        # 해당 GPU들은 baseline 상태(α=β=1.0)로 stage time을 계산
+        clean_alpha = {int(gpu_id): 1.0 for gpu_id in healthy_gpus}
+        clean_beta = {int(gpu_id): 1.0 for gpu_id in healthy_gpus}
+        return self._calculate_replan_stage_time(healthy_gpus, clean_alpha, clean_beta)
 
     def solve_optimal_partition(
         self,

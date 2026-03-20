@@ -3,6 +3,7 @@ from __future__ import absolute_import, division, print_function
 import torch.cuda.nvtx as nvtx
 
 import argparse
+import json
 import logging
 import os
 import random
@@ -10,6 +11,7 @@ import sys
 import time
 from functools import partial
 from itertools import chain
+from pathlib import Path
 from typing import Iterable, Optional
 
 # ensure the soft_target directory (project root) is on sys.path so we can import planner modules
@@ -23,12 +25,16 @@ import torchvision.datasets as dst
 import torchvision.transforms as transforms
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import yaml
 
 import dataset.datasets as small_datasets
 from kd_losses import Logits, SoftTarget
 from models.factory import create_model
 from tspipe import TSPipe
 from tspipe.tspipe import TSPipeMode
+from tspipe.slowdown_detector import SlowdownDetector
+from planner.mathematical_optimizer import MathematicalFailoverOptimizer
+from planner.stage_time_predictor import PartitionConfig
 from utils import (AverageMeter, accuracy, count_parameters,
                    count_parameters_in_MB, create_exp_dir,
                    load_pretrained_model, save_checkpoint)
@@ -101,6 +107,10 @@ parser.add_argument('--target-fail-gpu', type=int, default=-1, help='GPU to simu
 parser.add_argument('--fail-after-batches', type=int, default=10, help='Number of batches before simulating failure')
 parser.add_argument('--resume-checkpoint', type=str, default='',
                     help='Path to healthy_checkpoint_latest.pth for failure recovery resume')
+parser.add_argument('--soft-failover-enable', action='store_true',
+                    help='Enable mathematical soft-failover optimizer (planner-backed) during profiling runs')
+parser.add_argument('--soft-failover-auto-restart', action='store_true',
+                    help='When used with --soft-failover-enable, write failover_restart_config.json + checkpoint and exit 42 on REPLAN/DEGRADE decisions (same behavior as train_kd.py)')
 
 args, unparsed = parser.parse_known_args()
 
@@ -122,6 +132,110 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(random_seed)
 random.seed(random_seed)
+
+
+def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
+    """Read option value from parse_known_args() leftovers (same helper as train_kd.py)."""
+    for idx, token in enumerate(unparsed_args):
+        if token == name and idx + 1 < len(unparsed_args):
+            return unparsed_args[idx + 1]
+        prefix = f"{name}="
+        if token.startswith(prefix):
+            return token[len(prefix):]
+    return None
+
+
+def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict):
+    """Overwrite tspipe model_split in YAML so restarted process boots with new partition.
+
+    This mirrors train_kd.py but omits extra metadata fields.
+    """
+    tspipe_config_path = _extract_cli_option(unparsed, "--tspipe-config")
+    if not tspipe_config_path:
+        logging.warning("Failover restart detected but --tspipe-config not found in CLI args")
+        return
+
+    partition = restart_payload.get("partition", {})
+    snet_partition = partition.get("snet_partition")
+    tnet_partition = partition.get("tnet_partition")
+    if not isinstance(snet_partition, list) or not isinstance(tnet_partition, list):
+        logging.warning("failover restart payload missing snet/tnet partition lists; skip YAML override")
+        return
+
+    with open(tspipe_config_path, "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f) or {}
+    cfg.setdefault("tspipe", {})
+    cfg["tspipe"].setdefault("model_split", {})
+    cfg["tspipe"]["model_split"]["online"] = [int(v) for v in snet_partition]
+    cfg["tspipe"]["model_split"]["target"] = [int(v) for v in tnet_partition]
+
+    with open(tspipe_config_path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(cfg, f, sort_keys=False)
+
+
+def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimizer):
+    """Load failover_restart_config/checkpoint and return resume info.
+
+    Simpler variant of train_kd._load_failover_bootstrap(): we only care about
+    global_step and partition (no epoch/batch offset semantics in profiling).
+    """
+    failover_restart_path = os.path.join(save_root, "failover_restart_config.json")
+    legacy_restart_path = os.path.join(save_root, "restart_config.json")
+
+    restart_config_path = failover_restart_path
+    if not os.path.exists(restart_config_path):
+        restart_config_path = legacy_restart_path
+
+    if not os.path.exists(restart_config_path):
+        return {"enabled": False, "resume_step": 0, "partition": None}
+
+    with open(restart_config_path, "r", encoding="utf-8") as f:
+        restart_payload = json.load(f)
+
+    if not isinstance(restart_payload.get("partition"), dict):
+        logging.info(
+            f"Ignoring non-soft restart payload file: {os.path.basename(restart_config_path)}"
+        )
+        return {"enabled": False, "resume_step": 0, "partition": None}
+
+    _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+
+    checkpoint_path = restart_payload.get("checkpoint_path") or os.path.join(
+        save_root, "failover_checkpoint_latest.pth"
+    )
+    resume_step = int(restart_payload.get("step_id", 0))
+
+    if os.path.exists(checkpoint_path):
+        ckpt = torch.load(checkpoint_path, map_location="cpu")
+        if "student_state_dict" in ckpt:
+            snet.load_state_dict(ckpt["student_state_dict"], strict=True)
+        if "teacher_state_dict" in ckpt:
+            tnet.load_state_dict(ckpt["teacher_state_dict"], strict=True)
+        if "optimizer_state_dict" in ckpt:
+            try:
+                optimizer.load_state_dict(ckpt["optimizer_state_dict"])
+            except RuntimeError as e:
+                logging.warning(
+                    f"Optimizer state mismatch after partition change, skipping: {e}"
+                )
+        resume_step = int(ckpt.get("global_step", resume_step))
+    else:
+        logging.warning(
+            f"restart_config found but checkpoint missing: {checkpoint_path}"
+        )
+
+    partition = restart_payload.get("partition", {})
+    partition_cfg = None
+    if isinstance(partition.get("snet_partition"), list) and isinstance(
+        partition.get("tnet_partition"), list
+    ):
+        partition_cfg = PartitionConfig(
+            snet_partition=[int(v) for v in partition.get("snet_partition", [])],
+            tnet_partition=[int(v) for v in partition.get("tnet_partition", [])],
+            gpu_assignment=[int(v) for v in partition.get("gpu_assignment", [])],
+        )
+
+    return {"enabled": True, "resume_step": resume_step, "partition": partition_cfg}
 
 
 def dummy_target_update(m, online_new_param: Optional[Iterable[torch.Tensor]], 
@@ -227,6 +341,10 @@ def main():
             batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
     # initialize tspipe (if needed)
+    slowdown_detector = None
+    failover_optimizer = None
+    timing_ingestor = None
+
     if args.tspipe:
         if not isinstance(snet, torch.nn.Sequential):
             snet = snet.to_sequential()
@@ -267,6 +385,17 @@ def main():
                                     weight_decay = args.weight_decay,
                                     nesterov = True)
 
+        # Soft-failover restart bootstrap: resume from previous REPLAN/DEGRADE run if present.
+        bootstrap = _load_failover_bootstrap(
+            save_root=args.save_root,
+            unparsed_args=unparsed,
+            snet=snet,
+            tnet=tnet,
+            optimizer=optimizer,
+        )
+        global niter
+        niter = int(bootstrap["resume_step"])
+
         tspipe_trainer = TSPipe(
             snet,
             tnet,
@@ -281,6 +410,56 @@ def main():
             extra_args=args
         )
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
+        # Optional: initialize soft-failover monitoring components for profiling runs.
+        if args.soft_failover_enable:
+            slowdown_detector = SlowdownDetector()
+
+            # Use the YAML model_split used by this TSPipe instance as the initial partition,
+            # then override with bootstrap partition if a previous REPLAN/DEGRADE run exists.
+            yaml_partition_config = PartitionConfig(
+                snet_partition=tspipe_trainer.config['model_split']['online'],
+                tnet_partition=tspipe_trainer.config['model_split']['target'],
+                gpu_assignment=list(range(len(tspipe_trainer.config['model_split']['online'])))
+            )
+
+            initial_partition = bootstrap.get("partition") or yaml_partition_config
+
+            failover_optimizer = MathematicalFailoverOptimizer(
+                total_epochs=args.epochs,
+                steps_per_epoch=len(train_loader),
+                initial_partition_config=initial_partition,
+            )
+
+            # Optional full restart pipeline: mirror train_kd.py behavior when requested.
+            if args.soft_failover_auto_restart:
+                def _save_failover_checkpoint(meta):
+                    checkpoint_path = os.path.join(args.save_root, 'failover_checkpoint_latest.pth')
+                    state = {
+                        'global_step': niter,
+                        'policy': meta.get('trigger_policy'),
+                        'partition': meta.get('partition'),
+                        'alpha_comp': meta.get('alpha_comp'),
+                        'beta_comm': meta.get('beta_comm'),
+                        'student_state_dict': snet.state_dict(),
+                        'teacher_state_dict': tnet.state_dict(),
+                        'optimizer_state_dict': optimizer.state_dict(),
+                        'timestamp': time.time(),
+                    }
+                    torch.save(state, checkpoint_path)
+                    logging.error(f"💾 Failover checkpoint saved: {checkpoint_path}")
+                    return checkpoint_path
+
+                failover_optimizer.configure_failover_restart(
+                    restart_config_path=os.path.join(args.save_root, 'failover_restart_config.json'),
+                    checkpoint_saver=_save_failover_checkpoint,
+                    auto_restart_on_failover=True,
+                )
+                logging.info("✅ Soft failover auto-restart enabled (full pipeline)")
+            else:
+                logging.info("✅ Soft failover decision-only mode enabled (no auto-restart)")
+
+            profiling_dir = os.path.join(args.save_root, 'profiling_logs')
+            timing_ingestor = RuntimeTimingIngestor(profiling_dir)
         # If requested, prepare planner alpha/beta from baseline CSVs and exit
         if args.prepare_planner:
             from planner.alpha_beta_generator import compute_and_save_alpha_beta
@@ -327,7 +506,18 @@ def main():
                 for param_group in optimizer.param_groups:
                     tspipe_trainer.update_lr(param_group['lr'])
                     break
-                train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoch, writer)
+                train_tspipe(
+                    tspipe_trainer,
+                    train_loader,
+                    nets,
+                    optimizer,
+                    criterions,
+                    epoch,
+                    writer,
+                    slowdown_detector=slowdown_detector,
+                    failover_optimizer=failover_optimizer,
+                    timing_ingestor=timing_ingestor,
+                )
             else:
                 train(train_loader, nets, optimizer, criterions, epoch, writer)
 
@@ -460,6 +650,80 @@ def auto_convert(output):
         return None, None, None, None, None, output
     return output
 
+
+class RuntimeTimingIngestor:
+    """Aggregate real per-GPU compute/comm timings from profiler trace files.
+
+    This is a lightweight copy of the ingestor used in train_kd.py, kept local
+    to avoid importing that training script (which has side-effectful argparse).
+    """
+
+    def __init__(self, profiling_dir: str, window: int = 64):
+        self.profiling_dir = Path(profiling_dir)
+        self.window = max(8, int(window))
+        self._offsets = {}
+        self._compute_hist = {}
+        self._comm_hist = {}
+
+    def _append_hist(self, store, gpu_id: int, value: float):
+        buf = store.get(gpu_id)
+        if buf is None:
+            from collections import deque
+            buf = deque(maxlen=self.window)
+            store[gpu_id] = buf
+        buf.append(float(value))
+
+    def update(self):
+        if not self.profiling_dir.exists():
+            return
+
+        for trace_path in self.profiling_dir.glob("gpu_task_summary_partition*.jsonl"):
+            key = str(trace_path)
+            last_offset = self._offsets.get(key, 0)
+            try:
+                with open(trace_path, "r", encoding="utf-8") as f:
+                    f.seek(last_offset)
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+
+                        gpu_id = int(record.get("device", -1))
+                        if gpu_id < 0:
+                            continue
+                        task_time_ms = float(record.get("time_ms", 0.0))
+                        if task_time_ms <= 0:
+                            continue
+
+                        task_name = str(record.get("task_name", ""))
+                        if task_name.startswith("compute"):
+                            self._append_hist(self._compute_hist, gpu_id, task_time_ms)
+                        elif task_name.startswith("copy"):
+                            self._append_hist(self._comm_hist, gpu_id, task_time_ms)
+                    self._offsets[key] = f.tell()
+            except OSError:
+                continue
+
+    def build_timing_payload(self):
+        payload = {}
+        all_gpu_ids = set(self._compute_hist.keys()) | set(self._comm_hist.keys())
+        for gpu_id in all_gpu_ids:
+            c_hist = self._compute_hist.get(gpu_id, [])
+            m_hist = self._comm_hist.get(gpu_id, [])
+            if not c_hist and not m_hist:
+                continue
+            compute_ms = (sum(c_hist) / len(c_hist)) if c_hist else 0.0
+            comm_ms = (sum(m_hist) / len(m_hist)) if m_hist else 0.0
+            payload[gpu_id] = {
+                "compute_time": compute_ms,
+                "comm_time": comm_ms,
+            }
+        return payload
+
 def train(train_loader, nets, optimizer, criterions, epoch, writer):
     global niter
 
@@ -550,12 +814,18 @@ def tspipe_loss(model_out: torch.Tensor, ema_model_out: torch.Tensor, label: tor
     return cls_loss + kd_loss
 
 niter = 0
-def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoch, writer):
+def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoch, writer,
+                 slowdown_detector: Optional[SlowdownDetector] = None,
+                 failover_optimizer: Optional[MathematicalFailoverOptimizer] = None,
+                 timing_ingestor: Optional[RuntimeTimingIngestor] = None):
+    """TSPipe training loop for profiling with optional soft-failover monitoring."""
     global niter
+
     pbar = tqdm(train_loader)
     torch.cuda.profiler.start()
     loop_start_time = time.time()
     for i, (img, target) in enumerate(pbar, start=1):
+        # Respect wall-clock and step limits used in profiling experiments.
         if args.max_runtime_seconds > 0 and (time.time() - loop_start_time) >= args.max_runtime_seconds:
             torch.cuda.synchronize()
             time.sleep(1)
@@ -568,9 +838,63 @@ def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoc
             torch.cuda.profiler.stop()
             break
 
+        batch_start_time = time.time()
         loss = tspipe_trainer.feed(img, img, target)
         if loss is None:
             continue
+
+        batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000.0
+
+        if failover_optimizer is not None:
+            failover_optimizer.update_training_progress(niter, epoch)
+
+        timing_payload = {}
+        if failover_optimizer is not None and timing_ingestor is not None:
+            timing_ingestor.update()
+            timing_payload = timing_ingestor.build_timing_payload()
+            if timing_payload:
+                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
+
+        if slowdown_detector is not None:
+            slowdown_detector.record_stage_time(batch_elapsed_time_ms)
+
+        if failover_optimizer is not None and niter % 10 == 0:
+            use_timing_based = (
+                timing_payload
+                and failover_optimizer.alpha_g
+                and not failover_optimizer._is_phase0_baseline_active()
+            )
+
+            if use_timing_based:
+                slow_gpu_id = failover_optimizer.identify_slow_gpu()
+                slowdown_ratio = max(
+                    failover_optimizer.alpha_g.get(slow_gpu_id, 1.0),
+                    failover_optimizer.beta_g.get(slow_gpu_id, 1.0),
+                )
+            elif slowdown_detector is not None:
+                slowdown_ratio = slowdown_detector.get_slowdown_ratio()
+                slow_gpu_id = 0
+            else:
+                slowdown_ratio = 1.0
+                slow_gpu_id = 0
+
+            _SLOWDOWN_TRIGGER = 1.10
+            if slowdown_ratio > _SLOWDOWN_TRIGGER:
+                logging.info(
+                    f"⚠️ Slowdown detected: {slowdown_ratio:.2f}x "
+                    f"(GPU {slow_gpu_id}) at step {niter}"
+                )
+                policy = failover_optimizer.evaluate_slowdown_and_decide(
+                    gpu_id=slow_gpu_id,
+                    current_slowdown=slowdown_ratio,
+                )
+                logging.info(
+                    f"🎯 Failover Policy Decision: {policy} "
+                    f"(step={niter}, slowdown={slowdown_ratio:.2f}x, gpu={slow_gpu_id})"
+                )
+                failover_optimizer.execute_policy(
+                    policy, gpu_id=slow_gpu_id, current_slowdown=slowdown_ratio
+                )
 
         writer.add_scalar('loss', loss, global_step=niter)
         pbar.set_postfix({'loss': loss, 'batch_id': niter})

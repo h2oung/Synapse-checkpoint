@@ -11,10 +11,13 @@ FAILOVER_EXIT_CODE=42
 BASE_SAVE_ROOT="${BASE_SAVE_ROOT:-./results}"
 RUN_NOTE="${RUN_NOTE:-e2e_failover}"
 RUN_DIR="${BASE_SAVE_ROOT}/${RUN_NOTE}"
-RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
+SOFT_RESTART_CONFIG_PATH="${RUN_DIR}/failover_restart_config.json"
+HARD_RESTART_CONFIG_PATH="${RUN_DIR}/emergency_restart_config.json"
+LEGACY_RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
+E2E_MASTER_IP="${E2E_MASTER_IP:-127.0.0.1}"
 
-# Default GPU set for initial boot (before any restart_config exists).
-DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-0,1,2,3}"
+# Default GPU set for initial boot (before any restart config exists).
+DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-0,3,4,6}"
 
 # Optional restart limit to avoid infinite loops during debugging.
 MAX_RESTARTS="${MAX_RESTARTS:-0}"  # 0 means unlimited
@@ -27,17 +30,17 @@ Usage:
 
 Example:
   ./run_e2e_failover.sh \
-    --data_name cifar100 \
-    --t_name resnet110 \
-    --s_name resnet20 \
-    --kd_mode logits \
-    --s_init <student_ckpt> \
-    --t_model <teacher_ckpt>
+    --data_name imagenet100 \
+    --t_name vit_large \
+    --s_name resnet152 \
+    --kd_mode st \
+    --s_init ./results/base/base-i100-resnet152/initial_r152.pth.tar \
+    --t_model ./results/base/base-i100-vit-large/model_best.pth.tar
 
 Environment variables:
   BASE_SAVE_ROOT       Base save directory (default: ./results)
   RUN_NOTE             Run note subdir (default: e2e_failover)
-  DEFAULT_VISIBLE_GPUS Initial visible GPUs before restart_config exists (default: 0,1,2,3)
+  DEFAULT_VISIBLE_GPUS Initial visible GPUs before restart config exists (default: 0,3,4,6)
   MAX_RESTARTS         Max failover restarts; 0 for unlimited (default: 0)
 USAGE
   exit 2
@@ -57,65 +60,138 @@ echo "[E2E] Starting failover loop..."
 while true; do
   GPU_ASSIGNMENT=""
   NUM_GPUS=0
+  RESTART_SOURCE_PATH=""
 
-  if [[ -f "${RESTART_CONFIG_PATH}" ]]; then
-    mapfile -t _gpu_meta < <(python - "${RESTART_CONFIG_PATH}" <<'PY'
+  if [[ -f "${SOFT_RESTART_CONFIG_PATH}" || -f "${HARD_RESTART_CONFIG_PATH}" || -f "${LEGACY_RESTART_CONFIG_PATH}" ]]; then
+    mapfile -t _gpu_meta < <(DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS}" python - "${SOFT_RESTART_CONFIG_PATH}" "${HARD_RESTART_CONFIG_PATH}" "${LEGACY_RESTART_CONFIG_PATH}" <<'PY'
 import json
+import os
 import sys
-path = sys.argv[1]
-try:
-    with open(path, 'r', encoding='utf-8') as f:
-        cfg = json.load(f)
-    gpu_assignment = cfg.get('partition', {}).get('gpu_assignment', [])
-    if isinstance(gpu_assignment, list) and gpu_assignment:
-        gpu_assignment = [int(x) for x in gpu_assignment]
-        print(','.join(str(x) for x in gpu_assignment))
-        print(len(gpu_assignment))
-    else:
-        print('')
-        print(0)
-except Exception:
+
+def parse_default_visible_gpus():
+    raw = os.environ.get("DEFAULT_VISIBLE_GPUS", "")
+    vals = []
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            vals.append(int(tok))
+        except Exception:
+            continue
+    return vals
+
+def read_gpu_assignment(path):
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            cfg = json.load(f)
+        gpu_assignment = cfg.get('partition', {}).get('gpu_assignment', [])
+        if isinstance(gpu_assignment, list) and gpu_assignment:
+            return [int(x) for x in gpu_assignment]
+    except Exception:
+        return None
+    return None
+
+candidates = []
+default_visible = parse_default_visible_gpus()
+for p in sys.argv[1:]:
+    if os.path.isfile(p):
+        gpus = read_gpu_assignment(p)
+        if gpus:
+            # REPLAN payload often stores local indices (0..N-1) relative to current visibility.
+            # Map those local indices back to physical GPU ids from DEFAULT_VISIBLE_GPUS.
+            if default_visible and all(0 <= g < len(default_visible) for g in gpus):
+                gpus = [default_visible[g] for g in gpus]
+            candidates.append((os.path.getmtime(p), gpus, p))
+
+if candidates:
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    _, gpus, src = candidates[0]
+    print(','.join(str(x) for x in gpus))
+    print(len(gpus))
+    print(src)
+else:
     print('')
     print(0)
+    print('')
 PY
 )
     GPU_ASSIGNMENT="${_gpu_meta[0]:-}"
     NUM_GPUS="${_gpu_meta[1]:-0}"
+    RESTART_SOURCE_PATH="${_gpu_meta[2]:-}"
   fi
 
   if [[ -n "${GPU_ASSIGNMENT}" && "${NUM_GPUS}" -gt 0 ]]; then
     export CUDA_VISIBLE_DEVICES="${GPU_ASSIGNMENT}"
-    echo "[E2E] Restart config detected -> CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, nproc=${NUM_GPUS}"
+    echo "[E2E] Restart config detected (${RESTART_SOURCE_PATH}) -> CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, partitions=${NUM_GPUS}"
   else
     export CUDA_VISIBLE_DEVICES="${DEFAULT_VISIBLE_GPUS}"
     NUM_GPUS=$(python - <<'PY'
 import os
 v = os.environ.get('CUDA_VISIBLE_DEVICES', '')
-items = [x.strip() for x in v.split(',') if x.strip() != '']
+items = [x.strip() for x in v.split(',') if x.strip()]
 print(len(items) if items else 1)
 PY
 )
-    echo "[E2E] Fresh start/default -> CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, nproc=${NUM_GPUS}"
+    echo "[E2E] Fresh start/default -> CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES}, partitions=${NUM_GPUS}"
   fi
 
-  set +e
-  if [[ "${NUM_GPUS}" -eq 1 ]]; then
-    # For single-process dry-runs, run Python directly so exit code 42 is preserved.
-    python benchmarks/soft_target/train_kd.py \
-      --tspipe-enable \
-      --save_root "${BASE_SAVE_ROOT}" \
-      --note "${RUN_NOTE}" \
-      "$@"
-    EXIT_CODE=$?
-  else
-    torchrun --standalone --nproc_per_node="${NUM_GPUS}" \
-      benchmarks/soft_target/train_kd.py \
-      --tspipe-enable \
-      --save_root "${BASE_SAVE_ROOT}" \
-      --note "${RUN_NOTE}" \
-      "$@"
-    EXIT_CODE=$?
+  # NCCL 환경 설정 (로컬 단일 노드 디버깅/교착 회피용)
+  export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+  export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
+  export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+  export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+  export GLOO_SOCKET_IFNAME="${GLOO_SOCKET_IFNAME:-lo}"
+  export TP_SOCKET_IFNAME="${TP_SOCKET_IFNAME:-lo}"
+  echo "[E2E] Dist env: MASTER_IP=${E2E_MASTER_IP}, NCCL_DEBUG=${NCCL_DEBUG}, NCCL_IB_DISABLE=${NCCL_IB_DISABLE}, NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE}, NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME}, GLOO_SOCKET_IFNAME=${GLOO_SOCKET_IFNAME}, TP_SOCKET_IFNAME=${TP_SOCKET_IFNAME}"
+
+  # IMPORTANT:
+  # TSPipe 자체가 단일 primary 프로세스에서 내부 worker/NCCL/RPC를 초기화합니다.
+  # torchrun으로 외부 다중 프로세스를 추가하면 rank 충돌과 wait_ready 교착이 발생할 수 있어
+  # E2E 런처는 항상 단일 python 프로세스로 train_kd.py를 실행합니다.
+
+  # 포트 충돌 방지: E2E 전용 변수(E2E_NCCL_BASE_PORT)가 없으면 사용 가능한 포트 베이스를 동적으로 선택
+  _port_base="${E2E_NCCL_BASE_PORT:-}"
+  if [[ -z "${_port_base}" ]]; then
+    _port_base=$(python - <<'PY'
+import random
+import socket
+
+def can_bind(port: int) -> bool:
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        s.close()
+
+start = random.randint(30000, 50000)
+for i in range(4000):
+    p = 30000 + ((start - 30000 + i) % 20000)
+    if can_bind(p) and can_bind(p + 100):
+        print(p)
+        break
+else:
+    print(32768)
+PY
+)
   fi
+  echo "[E2E] Selected NCCL base port=${_port_base}"
+  
+  set +e
+  PYTORCH_DISTRIBUTED_NCCL_START_PORT=${_port_base} \
+  python benchmarks/soft_target/train_kd.py \
+    --tspipe-enable \
+    --tspipe-config=benchmarks/soft_target/tspipe.yaml \
+    --ip="${E2E_MASTER_IP}" \
+    --rank=0 \
+    --num-nodes=1 \
+    --save_root "${BASE_SAVE_ROOT}" \
+    --note "${RUN_NOTE}" \
+    "$@"
+  EXIT_CODE=$?
   set -e
 
   echo "[E2E] train_kd.py exited with code ${EXIT_CODE}"

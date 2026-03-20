@@ -110,9 +110,8 @@ class TSPipe():
         
         # Failover 시스템 초기화
         self.failover_enabled = args.failover_enable
-        self.backup_gpu_ids = []
-        if args.backup_gpus:
-            self.backup_gpu_ids = [int(x.strip()) for x in args.backup_gpus.split(',')]
+        # 백업 GPU는 K-1 재구성 방식으로 통일하기 위해 미사용
+        # self.backup_gpu_ids = []
         
         self.gpu_health_monitor: Optional[GPUHealthMonitor] = None
         self.process_health_monitor: Optional[ProcessHealthMonitor] = None
@@ -266,7 +265,7 @@ class TSPipe():
         AffinityManager().set_affinity_for_scheduler()
 
         # module validity check
-        if not self.config['model_split']['target'] or not self.config['model_split']['target']:
+        if not self.config['model_split']['online'] or not self.config['model_split']['target']:
             raise NotImplementedError("Model Split is not configured.")
         verify_module(self.module_online)
         verify_module(self.module_target)
@@ -385,9 +384,7 @@ class TSPipe():
         
         Log.i("✅ Failover system initialized")
         if self.experiment_logger:
-            self.experiment_logger.log_message("✅ Failover 시스템 초기화 완료", {
-                'backup_gpus': self.backup_gpu_ids,
-                'health_check_interval': self.args.health_check_interval,
+                self.experiment_logger.log_message("✅ Failover 시스템 초기화 완료 (K-1 재구성 방식)", {
                 'original_config': self.original_partition_config
             })
 
@@ -455,9 +452,8 @@ class TSPipe():
         self._prepare_k_minus_1_restart(failed_gpu_id)
         
         # 6. 프로세스 완전 종료 (재시작은 외부 스크립트가 담당)
-        import os
         Log.e("💀 Process termination scheduled - external restart required")
-        os._exit(42)  # 모니터 스레드에서도 프로세스 전체 즉시 종료
+        sys.exit(42)  # 모든 I/O 버퍼를 플러시한 후 우아한 종료
 
     def _cleanup_distributed_environment(self):
         """분산 통신 환경 완전 정리 (Clean Shutdown)"""
@@ -596,12 +592,39 @@ class TSPipe():
         try:
             # 사용 가능한 GPU 목록 (실패한 GPU 제외)
             available_gpus = [i for i in range(torch.cuda.device_count()) if i != failed_gpu_id]
+            if not available_gpus:
+                Log.e("❌ No available GPU remains after failure")
+                return
             
             Log.i(f"📊 Available GPUs for restart: {available_gpus}")
             Log.i(f"📊 Original partition config: {self.original_partition_config}")
+
+            # Hard failure path: compute fresh K-1 contiguous partition via DP if planner is available.
+            degraded_partition = None
+            try:
+                from planner.stage_time_predictor import StageTimePredictor
+
+                predictor = StageTimePredictor()
+                clean_alpha = {int(g): 1.0 for g in available_gpus}
+                clean_beta = {int(g): 1.0 for g in available_gpus}
+                degraded_partition = predictor.solve_optimal_partition(
+                    gpu_ids=available_gpus,
+                    alpha_g=clean_alpha,
+                    beta_g=clean_beta,
+                )
+                if degraded_partition is not None:
+                    Log.i(
+                        "🧮 Hard failover DP repartition complete: "
+                        f"snet={degraded_partition.snet_partition}, "
+                        f"tnet={degraded_partition.tnet_partition}, "
+                        f"gpus={degraded_partition.gpu_assignment}"
+                    )
+            except Exception as e:
+                Log.w(f"⚠️ Hard failover DP repartition unavailable, fallback to legacy metadata only: {e}")
             
             # 재시작 정보를 파일로 저장
             restart_config = {
+                'restart_type': 'hard_failure',
                 'failed_gpu': failed_gpu_id,
                 'available_gpus': available_gpus,
                 'original_config': self.original_partition_config,
@@ -609,15 +632,22 @@ class TSPipe():
                 'emergency_checkpoint_path': f"{self.config.get('__artifact_dir', '.')}/emergency_checkpoint.pth",
                 'failover_timestamp': time()
             }
+
+            if degraded_partition is not None:
+                restart_config['partition'] = {
+                    'gpu_assignment': [int(g) for g in degraded_partition.gpu_assignment],
+                    'snet_partition': [int(v) for v in degraded_partition.snet_partition],
+                    'tnet_partition': [int(v) for v in degraded_partition.tnet_partition],
+                }
             
             import json
             artifact_dir = self.config.get('__artifact_dir', '.')
             os.makedirs(artifact_dir, exist_ok=True)
-            restart_config_path = f"{artifact_dir}/restart_config.json" 
+            restart_config_path = f"{artifact_dir}/emergency_restart_config.json"
             with open(restart_config_path, 'w') as f:
                 json.dump(restart_config, f, indent=2)
                 
-            Log.i(f"✅ Restart configuration saved to {restart_config_path}")
+            Log.i(f"✅ Emergency restart configuration saved to {restart_config_path}")
             
         except Exception as e:
             Log.e(f"❌ Failed to prepare restart configuration: {e}")
@@ -672,18 +702,10 @@ class TSPipe():
                 self._terminate_worker(worker)
                 self.failed_workers[worker.partition_id] = worker
             
-            # 2. 백업 GPU가 있으면 해당 GPU로 재시작
-            if self.backup_gpu_ids:
-                backup_gpu = self.backup_gpu_ids.pop(0)
-                Log.i(f"🔀 Using backup GPU {backup_gpu} for recovery")
-                
-                for worker in failed_workers:
-                    self._restart_worker_on_gpu(worker.partition_id, backup_gpu)
-                    
-            else:
-                # 3. 남은 GPU들로 시스템 재구성
-                Log.i("🔀 Reconfiguring system with remaining GPUs")
-                self._reconfigure_with_remaining_gpus()
+            # 2. K-1 방식: 남은 GPU들로 시스템 재구성 (백업 GPU 미사용)
+            Log.i("⬇️ Executing K-1 reconfiguration (Soft Failure degrade approach)")
+            Log.i(f"🔀 Reconfiguring system with remaining GPUs (excluding GPU {failed_gpu_id})")
+            self._reconfigure_with_remaining_gpus()
             
             recovery_time_ms = (time() - recovery_start_time) * 1000
             
@@ -775,8 +797,8 @@ class TSPipe():
         
         Log.i(f"🔀 Reconfiguring with {len(healthy_gpus)} healthy GPUs: {healthy_gpus}")
         
-        # 새로운 파티션 설정 계산
-        new_config = self._calculate_new_partition_config(len(healthy_gpus))
+        # 새로운 파티션 설정 계산 (실제 GPU 목록 전달)
+        new_config = self._calculate_new_partition_config(healthy_gpus)
         
         if new_config:
             self.current_partition_config = new_config
@@ -793,19 +815,68 @@ class TSPipe():
         else:
             Log.e("❌ Failed to calculate new partition configuration")
 
-    def _calculate_new_partition_config(self, num_healthy_gpus: int) -> Optional[Dict]:
-        """남은 GPU 수에 맞는 새로운 파티션 설정 계산"""
+    def _calculate_new_partition_config(self, healthy_gpu_ids: List[int]) -> Optional[Dict]:
+        """DP 솔버를 사용한 최적 파티션 설정 계산 (Soft Failure degrade 방식)"""
+        if not healthy_gpu_ids or len(healthy_gpu_ids) <= 0:
+            return None
+        
+        try:
+            # DP 솔버 import
+            import sys
+            import os
+            proj_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '../..'))
+            if proj_root not in sys.path:
+                sys.path.insert(0, proj_root)
+            
+            from benchmarks.soft_target.planner.stage_time_predictor import StageTimePredictor
+            
+            # 건강한 GPU들: alpha_g = beta_g = 1.0 (reprofiling 가정)
+            alpha_g = {int(gpu_id): 1.0 for gpu_id in healthy_gpu_ids}
+            beta_g = {int(gpu_id): 1.0 for gpu_id in healthy_gpu_ids}
+            
+            # DP 솔버 인스턴스 생성
+            stage_time_predictor = StageTimePredictor()
+            
+            # DP 기반 최적 파티션 계산
+            partition_config = stage_time_predictor.solve_optimal_partition(
+                gpu_ids=healthy_gpu_ids,
+                alpha_g=alpha_g,
+                beta_g=beta_g
+            )
+            
+            if partition_config is None:
+                Log.w("⚠️ DP solver failed to compute partition, falling back to proportional split")
+                return self._calculate_proportional_partition_config(len(healthy_gpu_ids))
+            
+            # PartitionConfig를 Dict로 변환
+            new_config = {
+                'online': list(partition_config.snet_partition),
+                'target': list(partition_config.tnet_partition)
+            }
+            
+            Log.i(f"🧮 DP solver computed optimal partition: online={new_config['online']}, target={new_config['target']}")
+            Log.i(f"   GPU assignment: {partition_config.gpu_assignment}")
+            return new_config
+            
+        except ImportError as e:
+            Log.w(f"⚠️ Failed to import DP solver ({e}), falling back to proportional split")
+            return self._calculate_proportional_partition_config(len(healthy_gpu_ids))
+        except Exception as e:
+            Log.e(f"❌ DP solver error: {e}, falling back to proportional split")
+            return self._calculate_proportional_partition_config(len(healthy_gpu_ids))
+    
+    def _calculate_proportional_partition_config(self, num_healthy_gpus: int) -> Optional[Dict]:
+        """Fallback: 비례적 분할"""
         if num_healthy_gpus <= 0:
             return None
         
-        # 간단한 균등 분할 전략 (더 정교한 DP 알고리즘으로 대체 가능)
         original_online = self.original_partition_config['online']
         original_target = self.original_partition_config['target']
         
         total_online_layers = sum(original_online)
         total_target_layers = sum(original_target)
         
-        # 균등 분할
+        # 비례적 분할
         online_per_gpu = total_online_layers // num_healthy_gpus
         target_per_gpu = total_target_layers // num_healthy_gpus
         
@@ -820,6 +891,8 @@ class TSPipe():
             new_online[-1] += remaining_online
         if remaining_target > 0:
             new_target[-1] += remaining_target
+        
+        Log.i(f"📊 Proportional partition: online={new_online}, target={new_target}")
         
         return {
             'online': new_online,

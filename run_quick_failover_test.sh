@@ -25,8 +25,19 @@ source /home/wisekhy/miniconda3/bin/activate && conda activate tspipe
 export PYTHONPATH="/home/wisekhy/tspipe/Synapse-private:$PYTHONPATH"
 cd /home/wisekhy/tspipe/Synapse-private
 
+# 이 실험에서는 GPU 0,3,4,6만 사용하도록 고정
+export CUDA_VISIBLE_DEVICES="0,3,4,6"
+echo "🎯 CUDA_VISIBLE_DEVICES 고정: ${CUDA_VISIBLE_DEVICES}"
+
+# NCCL 환경 설정 (로컬 단일 노드 디버깅/교착 회피용)
+export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
+export NCCL_IB_DISABLE="${NCCL_IB_DISABLE:-1}"
+export NCCL_P2P_DISABLE="${NCCL_P2P_DISABLE:-1}"
+export NCCL_SOCKET_IFNAME="${NCCL_SOCKET_IFNAME:-lo}"
+echo "🔧 NCCL env: NCCL_DEBUG=${NCCL_DEBUG}, NCCL_IB_DISABLE=${NCCL_IB_DISABLE}, NCCL_P2P_DISABLE=${NCCL_P2P_DISABLE}, NCCL_SOCKET_IFNAME=${NCCL_SOCKET_IFNAME}"
+
 # 기본 실험 실행 (자동 GPU 할당 사용)
-echo "🔬 기본 Failover 실험 실행 중 (자동 GPU 할당 - 4개 GPU 필수)..."
+echo "🔬 기본 Failover 실험 실행 중 (GPU 0,3,4,6 고정, 자동 GPU 할당 정보만 출력)..."
 python run_failover_experiment.py \
     --experiment-type basic \
     --auto-gpu \

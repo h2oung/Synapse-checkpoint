@@ -59,7 +59,8 @@ class MathematicalFailoverOptimizer:
                  total_epochs: int = 1,
                  steps_per_epoch: int = 1000,
                  restart_costs: Optional[RestartCosts] = None,
-                 baseline_warmup_steps: int = 50):
+                 baseline_warmup_steps: int = 50,
+                 initial_partition_config: Optional[PartitionConfig] = None):
         self.logger = logging.getLogger(f"{__name__}.MathematicalFailoverOptimizer")
         
         # Load profiling data 
@@ -96,8 +97,14 @@ class MathematicalFailoverOptimizer:
         self.replan_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
         self.degrade_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
         
-        # Current partition tracking
-        self.current_partition = self._create_default_partition()
+        # ✅ Step 1: Current partition tracking - use provided YAML config or fallback to default
+        # This ensures optimizer knows the actual runtime partition from day 1
+        if initial_partition_config is not None:
+            self.current_partition = initial_partition_config
+            self.logger.info(f"📌 Initialized current_partition from YAML: snet={initial_partition_config.snet_partition}, tnet={initial_partition_config.tnet_partition}")
+        else:
+            self.current_partition = self._create_default_partition()
+            self.logger.warning("⚠️ Initialized current_partition from default (not from YAML) - consider passing initial_partition_config")
 
         # Runtime baseline buffers for dynamic alpha/beta estimation
         self._baseline_compute_time: Dict[int, float] = {}
@@ -107,6 +114,7 @@ class MathematicalFailoverOptimizer:
 
         # Runtime DP partitioner used at REPLAN/DEGRADE execution time.
         self._runtime_stage_time_predictor = StageTimePredictor()
+        self._sync_runtime_profile_with_partition()
 
         # Restart-based failover automation hooks (optional).
         self._auto_restart_on_failover = False
@@ -246,6 +254,97 @@ class MathematicalFailoverOptimizer:
         device = torch.device("cuda:0")
         total_memory = torch.cuda.get_device_properties(device).total_memory
         self.total_memory_kb = total_memory / 1024
+
+    def _resample_profile_vector(self, values: List[float], target_len: int) -> List[float]:
+        """Resample a per-layer profile vector to match runtime layer count."""
+        if target_len <= 0:
+            return []
+        if not values:
+            return [0.0] * target_len
+        if len(values) == target_len:
+            return list(values)
+        if len(values) == 1:
+            return [float(values[0])] * target_len
+
+        x_old = np.linspace(0.0, 1.0, len(values))
+        x_new = np.linspace(0.0, 1.0, target_len)
+        return np.interp(x_new, x_old, np.asarray(values, dtype=float)).tolist()
+
+    def _sync_runtime_profile_with_partition(self):
+        """Align profiler layer dimensions with runtime partition (e.g., 57/30 models)."""
+        target_snet_layers = int(sum(self.current_partition.snet_partition))
+        target_tnet_layers = int(sum(self.current_partition.tnet_partition))
+        if target_snet_layers <= 0 or target_tnet_layers <= 0:
+            self.logger.warning(
+                "⚠️ Skip runtime profile sync due to invalid partition sizes: "
+                f"snet={target_snet_layers}, tnet={target_tnet_layers}"
+            )
+            return
+
+        if (
+            target_snet_layers == self.snet_num_layers
+            and target_tnet_layers == self.tnet_num_layers
+        ):
+            return
+
+        self.logger.warning(
+            "⚠️ Profile/partition layer mismatch detected. "
+            f"Resampling profile vectors: snet {self.snet_num_layers}->{target_snet_layers}, "
+            f"tnet {self.tnet_num_layers}->{target_tnet_layers}"
+        )
+
+        self.snet_forward_times_ms = self._resample_profile_vector(self.snet_forward_times_ms, target_snet_layers)
+        self.snet_backward_times_ms = self._resample_profile_vector(self.snet_backward_times_ms, target_snet_layers)
+        self.snet_param_sizes_kb = self._resample_profile_vector(self.snet_param_sizes_kb, target_snet_layers)
+        self.snet_input_activation_sizes_kb = self._resample_profile_vector(self.snet_input_activation_sizes_kb, target_snet_layers)
+
+        self.tnet_forward_times_ms = self._resample_profile_vector(self.tnet_forward_times_ms, target_tnet_layers)
+        self.tnet_param_sizes_kb = self._resample_profile_vector(self.tnet_param_sizes_kb, target_tnet_layers)
+        self.tnet_input_activation_sizes_kb = self._resample_profile_vector(self.tnet_input_activation_sizes_kb, target_tnet_layers)
+
+        self.snet_num_layers = target_snet_layers
+        self.tnet_num_layers = target_tnet_layers
+
+        predictor = self._runtime_stage_time_predictor
+        predictor.snet_num_layers = target_snet_layers
+        predictor.tnet_num_layers = target_tnet_layers
+        predictor.snet_forward_times_ms = self._resample_profile_vector(
+            predictor.snet_forward_times_ms,
+            target_snet_layers,
+        )
+        predictor.snet_backward_times_ms = self._resample_profile_vector(
+            predictor.snet_backward_times_ms,
+            target_snet_layers,
+        )
+        predictor.snet_param_sizes_kb = self._resample_profile_vector(
+            predictor.snet_param_sizes_kb,
+            target_snet_layers,
+        )
+        predictor.snet_input_activation_sizes_kb = self._resample_profile_vector(
+            predictor.snet_input_activation_sizes_kb,
+            target_snet_layers,
+        )
+        predictor.snet_output_activation_sizes_kb = self._resample_profile_vector(
+            predictor.snet_output_activation_sizes_kb,
+            target_snet_layers,
+        )
+        predictor.tnet_forward_times_ms = self._resample_profile_vector(
+            predictor.tnet_forward_times_ms,
+            target_tnet_layers,
+        )
+        predictor.tnet_param_sizes_kb = self._resample_profile_vector(
+            predictor.tnet_param_sizes_kb,
+            target_tnet_layers,
+        )
+        predictor.tnet_input_activation_sizes_kb = self._resample_profile_vector(
+            predictor.tnet_input_activation_sizes_kb,
+            target_tnet_layers,
+        )
+
+        self.logger.info(
+            "✅ Runtime profile synchronized with partition: "
+            f"SNet={self.snet_num_layers}, TNet={self.tnet_num_layers}"
+        )
         
     def _load_gpu_coefficients(self):
         """Initialize ratio-only coefficients (Phase-0 starts from homogeneous defaults)."""
@@ -532,6 +631,30 @@ class MathematicalFailoverOptimizer:
     def _execute_keep(self, gpu_id: int, slowdown: float):
         """KEEP 정책 실행 (아무것도 하지 않음)"""
         self.logger.info(f"✅ Executing KEEP for GPU {gpu_id} (slowdown: {slowdown:.2f}) - No action needed")
+    
+    def identify_slow_gpu(self) -> int:
+        """Identify GPU with highest alpha or beta coefficient (slowest GPU)
+        
+        Returns:
+            int: GPU ID with maximum slowdown coefficient
+        """
+        if not self.alpha_g or not self.beta_g:
+            return 0  # Fallback to GPU 0 if no data
+        
+        max_slowdown = 1.0
+        slow_gpu_id = 0
+        
+        for gpu_id in self.alpha_g.keys():
+            alpha = self.alpha_g.get(gpu_id, 1.0)
+            beta = self.beta_g.get(gpu_id, 1.0)
+            slowdown = max(alpha, beta)
+            
+            if slowdown > max_slowdown:
+                max_slowdown = slowdown
+                slow_gpu_id = gpu_id
+        
+        self.logger.info(f"🔍 Identified slow GPU: GPU {slow_gpu_id} with slowdown {max_slowdown:.3f}x")
+        return slow_gpu_id
     
     def _run_realtime_dp_repartition(self, gpu_assignment: List[int], policy_name: str) -> Optional[PartitionConfig]:
         """Run minimax contiguous DP now using the latest monitored alpha/beta."""

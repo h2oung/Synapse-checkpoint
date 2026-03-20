@@ -67,7 +67,7 @@ tspipe:
     reduce_verbose: False
 
   gpipe_emulation:
-    enabled: False
+    enabled: True
     num_ubatch: 1
 
   async_param_update_emulation:

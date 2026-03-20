@@ -18,20 +18,31 @@ from tspipe.utils import use_device
 
 import socket
 
-def find_free_port(start_port=31101, max_attempts=100):
-    """사용 가능한 포트 찾기"""
+def find_free_port(start_port=31101, max_attempts=1000):
+    """사용 가능한 포트 찾기 (SO_REUSEADDR 옵션 포함)"""
     for port in range(start_port, start_port + max_attempts):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.bind(('localhost', port))
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                s.bind(('0.0.0.0', port))
                 return port
         except OSError:
             continue
     raise RuntimeError(f"Could not find free port in range {start_port}-{start_port + max_attempts}")
 
-# 동적 포트 할당
-PYTORCH_DISTRIBUTED_NCCL_PORT = find_free_port()
-PYTORCH_DISTRIBUTED_RPC_PORT = find_free_port(PYTORCH_DISTRIBUTED_NCCL_PORT + 1)
+# 동적 포트 할당 (더 넓은 범위에서)
+import os
+
+# 환경변수에서 포트 얻기 (명시적으로 설정된 경우)
+if 'PYTORCH_DISTRIBUTED_NCCL_START_PORT' in os.environ:
+    _base_port = int(os.environ['PYTORCH_DISTRIBUTED_NCCL_START_PORT'])
+    PYTORCH_DISTRIBUTED_NCCL_PORT = _base_port
+    PYTORCH_DISTRIBUTED_RPC_PORT = _base_port + 100
+else:
+    # 기본값 사용
+    _base_port = 32768
+    PYTORCH_DISTRIBUTED_NCCL_PORT = find_free_port(start_port=_base_port)
+    PYTORCH_DISTRIBUTED_RPC_PORT = find_free_port(start_port=_base_port + 100)
 
 
 class TensorPlaceholder:

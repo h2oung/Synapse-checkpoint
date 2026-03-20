@@ -123,6 +123,7 @@ def run_one_interval(args, interval: int, run_stamp: str) -> Dict[str, Any]:
         f"--healthy-checkpoint-interval={interval}",
         "--checkpoint-benchmark-enable",
         "--checkpoint-benchmark-prefix=exp0_checkpoint",
+        "--soft-failover-enable",
     ]
 
     print(f"\n[EXP0] Running N={interval} for {args.run_minutes} min")

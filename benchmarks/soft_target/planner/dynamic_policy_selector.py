@@ -119,6 +119,14 @@ class DynamicPolicySelector:
         eta_end = time.perf_counter()
         self.last_eta_compute_ms = (eta_end - eta_start) * 1000.0
         self.logger.info(f"⏱ ETA computation overhead: {self.last_eta_compute_ms:.3f} ms")
+
+        # If any GPU is hard-failed, prefer DEGRADE on ETA tie (or better)
+        # because DEGRADE is the semantically correct failover action.
+        if failed_gpus:
+            eta_replan = eta_result.eta_values.get(Policy.REPLAN, float('inf'))
+            eta_degrade = eta_result.eta_values.get(Policy.DEGRADE, float('inf'))
+            if eta_degrade <= eta_replan:
+                eta_result.optimal_policy = Policy.DEGRADE
         
         # 6. 결정 분석 및 검증
         decision = self._analyze_and_validate_decision(eta_result, K_rem, current_slowdown)
@@ -142,7 +150,17 @@ class DynamicPolicySelector:
         else:
             event = self.slowdown_events[gpu_id]
             event.slowdown_ratio = slowdown
-            event.sustained_duration = current_time - event.detection_time
+            
+            # ✅ FIX #3: Reset detection_time when slowdown falls below threshold
+            # Prevents false positives from transient spikes
+            _MIN_SLOWDOWN_THRESHOLD = 1.05  # Recovery threshold
+            if slowdown < _MIN_SLOWDOWN_THRESHOLD:
+                # GPU recovered: reset the detection clock
+                event.detection_time = current_time
+                event.sustained_duration = 0.0
+            else:
+                # Still slow: accumulate duration
+                event.sustained_duration = current_time - event.detection_time
             
     def _build_gpu_states(self, current_slowdown: float, affected_gpu_id: int, failed_gpus: List[int]) -> List[GPUPerformanceState]:
         """현재 GPU 상태 정보 구성"""

@@ -108,27 +108,29 @@ class ETACalculator:
     
     def _calculate_eta_replan(self, K_rem: int, T_replan: float) -> float:
         """
-        REPLAN 정책의 ETA 계산:  
+        REPLAN 정책의 ETA 계산:
         ETA(replan) = C_load + D_replan + R_replan * T_base + T_opt^(K) + K_rem * T(replan)
         """
-        # 0-B 규칙 고정: restart overhead = 4.37 + 50 * T_base (runtime T_base 사용)
-        restart_cost = self.restart_costs.C_load + self.restart_costs.R_replan * self.restart_costs.T_base
-        
-        remaining_time = K_rem * T_replan
-        
-        return restart_cost + remaining_time
-    
+        restart_cost = (
+            self.restart_costs.C_load
+            + self.restart_costs.D_replan
+            + self.restart_costs.R_replan * self.restart_costs.T_base
+            + self.restart_costs.T_opt_K
+        )
+        return restart_cost + K_rem * T_replan
+
     def _calculate_eta_degrade(self, K_rem: int, T_degrade: float) -> float:
         """
         DEGRADE 정책의 ETA 계산:
         ETA(degrade) = C_load + D_degrade + R_degrade * T_base + T_opt^(K-1) + K_rem * T(degrade)
-        """  
-        # DEGRADE도 REPLAN과 동일한 0-B restart 규칙 사용
-        restart_cost = self.restart_costs.C_load + self.restart_costs.R_replan * self.restart_costs.T_base
-        
-        remaining_time = K_rem * T_degrade
-        
-        return restart_cost + remaining_time
+        """
+        restart_cost = (
+            self.restart_costs.C_load
+            + self.restart_costs.D_degrade
+            + self.restart_costs.R_degrade * self.restart_costs.T_base
+            + self.restart_costs.T_opt_K_minus_1
+        )
+        return restart_cost + K_rem * T_degrade
         
     def update_restart_costs(self, new_costs: RestartCosts):
         """실험 중 측정된 실제 비용으로 업데이트"""

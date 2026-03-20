@@ -103,6 +103,7 @@ def build_command(args, interval: int, note: str, runtime_seconds: int,
         f"--healthy-checkpoint-interval={interval}",
         "--checkpoint-benchmark-enable",
         "--checkpoint-benchmark-prefix=exp0b_failover",
+        "--soft-failover-enable",
     ]
     if resume_checkpoint:
         cmd.append(f"--resume-checkpoint={resume_checkpoint}")
