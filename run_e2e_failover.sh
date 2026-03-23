@@ -17,10 +17,12 @@ LEGACY_RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
 E2E_MASTER_IP="${E2E_MASTER_IP:-127.0.0.1}"
 
 # Default GPU set for initial boot (before any restart config exists).
-DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-0,3,4,6}"
+DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-0,1,2,6}"
 
 # Optional restart limit to avoid infinite loops during debugging.
 MAX_RESTARTS="${MAX_RESTARTS:-0}"  # 0 means unlimited
+
+# RESTART_COUNT must be initialized outside the loop to persist across restarts
 RESTART_COUNT=0
 
 if [[ $# -eq 0 ]]; then
@@ -38,10 +40,12 @@ Example:
     --t_model ./results/base/base-i100-vit-large/model_best.pth.tar
 
 Environment variables:
-  BASE_SAVE_ROOT       Base save directory (default: ./results)
-  RUN_NOTE             Run note subdir (default: e2e_failover)
-  DEFAULT_VISIBLE_GPUS Initial visible GPUs before restart config exists (default: 0,3,4,6)
-  MAX_RESTARTS         Max failover restarts; 0 for unlimited (default: 0)
+  BASE_SAVE_ROOT           Base save directory (default: ./results)
+  RUN_NOTE                 Run note subdir (default: e2e_failover)
+  DEFAULT_VISIBLE_GPUS     Initial visible GPUs before restart config exists (default: 0,3,4,6)
+  MAX_RESTARTS             Max failover restarts; 0 for unlimited (default: 0)
+  FAILOVER_INJECT_SCENARIO Inject synthetic slowdown (e.g., KEEP_REPLAN_DEGRADE)
+  FAILOVER_TEST_FAST_GATES Enable fast gate detection for quick testing
 USAGE
   exit 2
 fi
@@ -61,6 +65,22 @@ while true; do
   GPU_ASSIGNMENT=""
   NUM_GPUS=0
   RESTART_SOURCE_PATH=""
+
+  # 🔧 Generate unique NCCL port for each restart iteration to avoid socket reuse conflicts
+  # Use larger port spacing (100) to ensure TCP TIME_WAIT (60s) doesn't block port reuse
+  # RESTART_COUNT=0: 31200 (first run)
+  # RESTART_COUNT=1: 31300 (failover restart #1, avoids TIME_WAIT overlap)
+  # RESTART_COUNT=2: 31400 (failover restart #2), etc.
+  if [[ -n "${E2E_NCCL_BASE_PORT:-}" ]]; then
+    _port_base="${E2E_NCCL_BASE_PORT}"
+    echo "[E2E] Using preset NCCL base port: ${_port_base}"
+  else
+    _port_base=$((31200 + (RESTART_COUNT * 100)))
+    echo "[E2E] 🔌 Port allocation: RESTART_COUNT=${RESTART_COUNT}, computed port=${_port_base} (spacing=100 to avoid TIME_WAIT)"
+    if [[ ${RESTART_COUNT} -gt 0 ]]; then
+      echo "[E2E] ✅ Failover restart iteration ${RESTART_COUNT}: Using NCCL port offset for clean socket state"
+    fi
+  fi
 
   if [[ -f "${SOFT_RESTART_CONFIG_PATH}" || -f "${HARD_RESTART_CONFIG_PATH}" || -f "${LEGACY_RESTART_CONFIG_PATH}" ]]; then
     mapfile -t _gpu_meta < <(DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS}" python - "${SOFT_RESTART_CONFIG_PATH}" "${HARD_RESTART_CONFIG_PATH}" "${LEGACY_RESTART_CONFIG_PATH}" <<'PY'
@@ -150,38 +170,30 @@ PY
   # torchrun으로 외부 다중 프로세스를 추가하면 rank 충돌과 wait_ready 교착이 발생할 수 있어
   # E2E 런처는 항상 단일 python 프로세스로 train_kd.py를 실행합니다.
 
-  # 포트 충돌 방지: E2E 전용 변수(E2E_NCCL_BASE_PORT)가 없으면 사용 가능한 포트 베이스를 동적으로 선택
-  _port_base="${E2E_NCCL_BASE_PORT:-}"
-  if [[ -z "${_port_base}" ]]; then
-    _port_base=$(python - <<'PY'
-import random
-import socket
-
-def can_bind(port: int) -> bool:
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    try:
-        s.bind(("127.0.0.1", port))
-        return True
-    except OSError:
-        return False
-    finally:
-        s.close()
-
-start = random.randint(30000, 50000)
-for i in range(4000):
-    p = 30000 + ((start - 30000 + i) % 20000)
-    if can_bind(p) and can_bind(p + 100):
-        print(p)
-        break
-else:
-    print(32768)
-PY
-)
+  # Note: NCCL port is now allocated per-restart inside the loop (see below)
+  
+  # Export failover scenario injection if specified (for SlowdownDetector intra-batch slowdown injection)
+  # Note: Must re-export here because subprocess env vars don't propagate to script context
+  export FAILOVER_INJECT_SCENARIO="${FAILOVER_INJECT_SCENARIO:=}"
+  export FAILOVER_TEST_FAST_GATES="${FAILOVER_TEST_FAST_GATES:=}"
+  
+  # For E2E quick tests: use shorter slowdown threshold (1 second instead of 30)
+  # Set FAILOVER_SLOWDOWN_THRESHOLD_SEC=30 to restore production behavior
+  if [[ -z "${FAILOVER_SLOWDOWN_THRESHOLD_SEC:-}" && -n "${FAILOVER_INJECT_SCENARIO}" ]]; then
+    export FAILOVER_SLOWDOWN_THRESHOLD_SEC="1.0"
+    echo "[E2E] Using fast slowdown threshold: 1.0s (for quick testing with scenario injection)"
   fi
-  echo "[E2E] Selected NCCL base port=${_port_base}"
+  
+  if [[ -n "${FAILOVER_INJECT_SCENARIO}" ]]; then
+    echo "[E2E] Failover scenario injection enabled: ${FAILOVER_INJECT_SCENARIO}"
+  fi
   
   set +e
+  echo "[DEBUG] NCCL PORT: ${_port_base}, RESTART_COUNT: ${RESTART_COUNT}"  # Debug log
   PYTORCH_DISTRIBUTED_NCCL_START_PORT=${_port_base} \
+  FAILOVER_INJECT_SCENARIO="${FAILOVER_INJECT_SCENARIO}" \
+  FAILOVER_SLOWDOWN_THRESHOLD_SEC="${FAILOVER_SLOWDOWN_THRESHOLD_SEC:-}" \
+  FAILOVER_TEST_FAST_GATES="${FAILOVER_TEST_FAST_GATES:-}" \
   python benchmarks/soft_target/train_kd.py \
     --tspipe-enable \
     --tspipe-config=benchmarks/soft_target/tspipe.yaml \

@@ -177,4 +177,5 @@ benchmarks/**/logs/
 
 # torch save artifacts
 *.pkl
-*.pickle
+*.pickleresults/
+benchmarks/soft_target/failover_logs/

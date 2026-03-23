@@ -23,10 +23,9 @@ from tspipe.affinity_manager import AffinityManager
 from tspipe.batch_ops import (Batch, BatchQueue, ScatterGatherFn,
                               defaultScatterGatherFn)
 from tspipe.batchnorm import DeferredBatchNorm
+from tspipe import communicator
 from tspipe.communicator import (Channel, Communicator, CommunicatorParam,
-                                 DistributedQueue,
-                                 PYTORCH_DISTRIBUTED_NCCL_PORT,
-                                 PYTORCH_DISTRIBUTED_RPC_PORT)
+                                 DistributedQueue)
 from tspipe.gpu_context import StreamDescriptor, StreamType, TaskContext
 from tspipe.gpu_task import GpuTask, TaskType
 from tspipe.gpu_worker import GpuWorker, LocalWorker
@@ -147,10 +146,9 @@ class TSPipe():
 
         Log.i(f"====== TSPipe (v{tspipe.__version__}) Initializing =====")
         Log.i(f"Running on Python {python_version()}, PyTorch {torch.__version__}")
-        # Capture ports ONCE in the parent process so spawned children use the same values
-        self._nccl_port = PYTORCH_DISTRIBUTED_NCCL_PORT
-        self._rpc_port = PYTORCH_DISTRIBUTED_RPC_PORT
-        Log.i(f"Fixed ports: NCCL={self._nccl_port}, RPC={self._rpc_port}")
+        # 🔄 Restart 시 새로운 포트값을 읽도록: 매번 함수 호출 (모듈 초기화 블록 우회)
+        self._nccl_port, self._rpc_port = communicator._get_nccl_rpc_ports()
+        Log.i(f"Fixed ports: NCCL={self._nccl_port}, RPC={self._rpc_port} (re-read from environment)")
         with open(args.tspipe_config, 'r') as f:
             self.config = yaml.load(f, Loader=yaml.FullLoader)['tspipe']
         self.config['__artifact_dir'] = artifact_dir
@@ -441,15 +439,15 @@ class TSPipe():
         
         # 2. 실패한 GPU worker 즉시 종료
         self._terminate_failed_workers(failed_gpu_id)
+
+        # 3. C++/RPC abort 이전에 external supervisor가 읽을 restart config를 먼저 남긴다.
+        self._prepare_k_minus_1_restart(failed_gpu_id)
         
-        # 3. 분산 통신 환경 완전 정리 (Clean Shutdown)
+        # 4. 분산 통신 환경 완전 정리 (Clean Shutdown)
         self._cleanup_distributed_environment()
         
-        # 4. 체크포인트 저장 (현재 상태 백업)
+        # 5. 체크포인트 저장 (현재 상태 백업)
         self._save_emergency_checkpoint()
-        
-        # 5. K-1 GPU로 재분할 계산 및 재시작 준비
-        self._prepare_k_minus_1_restart(failed_gpu_id)
         
         # 6. 프로세스 완전 종료 (재시작은 외부 스크립트가 담당)
         Log.e("💀 Process termination scheduled - external restart required")
@@ -463,14 +461,12 @@ class TSPipe():
             import torch.distributed as dist
             import torch.distributed.rpc as rpc
             
-            # 1. RPC 종료
+            # 1. RPC 종료 (5초 타임아웃으로 충분한 시간 제공)
             if rpc.is_available():
                 try:
-                    Log.e("🔌 Shutting down RPC...")
-                    rpc.shutdown()
-                    Log.e("✅ RPC shutdown complete")
-                except Exception as e:
-                    Log.e(f"⚠️ RPC shutdown skipped: {e}")
+                    rpc.shutdown(timeout=5.0)  # RPC 스레드 풀 완전 정리 대기
+                except Exception:
+                    pass  # timeout/error 무시
             
             # 2. NCCL/Gloo 프로세스 그룹 종료
             if dist.is_initialized():
@@ -599,6 +595,26 @@ class TSPipe():
             Log.i(f"📊 Available GPUs for restart: {available_gpus}")
             Log.i(f"📊 Original partition config: {self.original_partition_config}")
 
+            import json
+            artifact_dir = self.config.get('__artifact_dir', '.')
+            os.makedirs(artifact_dir, exist_ok=True)
+            restart_config_path = f"{artifact_dir}/emergency_restart_config.json"
+
+            # Persist minimal emergency payload first so external supervisor always has
+            # a consumable restart config even if DP repartition crashes mid-path.
+            restart_config = {
+                'restart_type': 'hard_failure',
+                'failed_gpu': failed_gpu_id,
+                'available_gpus': available_gpus,
+                'original_config': self.original_partition_config,
+                'checkpoint_path': f"{artifact_dir}/healthy_checkpoint_latest.pth",
+                'emergency_checkpoint_path': f"{artifact_dir}/emergency_checkpoint.pth",
+                'failover_timestamp': time()
+            }
+            with open(restart_config_path, 'w') as f:
+                json.dump(restart_config, f, indent=2)
+            Log.i(f"✅ Emergency restart base configuration saved to {restart_config_path}")
+
             # Hard failure path: compute fresh K-1 contiguous partition via DP if planner is available.
             degraded_partition = None
             try:
@@ -621,17 +637,6 @@ class TSPipe():
                     )
             except Exception as e:
                 Log.w(f"⚠️ Hard failover DP repartition unavailable, fallback to legacy metadata only: {e}")
-            
-            # 재시작 정보를 파일로 저장
-            restart_config = {
-                'restart_type': 'hard_failure',
-                'failed_gpu': failed_gpu_id,
-                'available_gpus': available_gpus,
-                'original_config': self.original_partition_config,
-                'checkpoint_path': f"{self.config.get('__artifact_dir', '.')}/healthy_checkpoint_latest.pth",
-                'emergency_checkpoint_path': f"{self.config.get('__artifact_dir', '.')}/emergency_checkpoint.pth",
-                'failover_timestamp': time()
-            }
 
             if degraded_partition is not None:
                 restart_config['partition'] = {
@@ -639,11 +644,15 @@ class TSPipe():
                     'snet_partition': [int(v) for v in degraded_partition.snet_partition],
                     'tnet_partition': [int(v) for v in degraded_partition.tnet_partition],
                 }
-            
-            import json
-            artifact_dir = self.config.get('__artifact_dir', '.')
-            os.makedirs(artifact_dir, exist_ok=True)
-            restart_config_path = f"{artifact_dir}/emergency_restart_config.json"
+                # K-1 GPU로 줄어든 partition에 맞게 alpha/beta 필터링
+                # gpu_assignment = [0, 1, 2] 라면, alpha/beta에서 이 3개 GPU만 유지
+                if hasattr(self, 'alpha_g') and hasattr(self, 'beta_g'):
+                    clean_alpha = {int(gpu): float(self.alpha_g.get(gpu, 0.5)) for gpu in degraded_partition.gpu_assignment}
+                    clean_beta = {int(gpu): float(self.beta_g.get(gpu, 1.0)) for gpu in degraded_partition.gpu_assignment}
+                    restart_config['alpha_comp'] = clean_alpha
+                    restart_config['beta_comm'] = clean_beta
+                    Log.i(f"✅ Saved filtered alpha/beta for K-1 partition: {list(degraded_partition.gpu_assignment)}")
+
             with open(restart_config_path, 'w') as f:
                 json.dump(restart_config, f, indent=2)
                 
@@ -1218,18 +1227,22 @@ class TSPipe():
 
             bid = self.batch_q.next_id
             with Operation('feed_api', batch_idx=bid):
-                if self.tspipe_mode == TSPipeMode.SELF_SUPERVISED_MOMENTUM:
+                if self.tspipe_mode == TSPipeMode.SELF_SUPERVISED_MOMENTUM or \
+                   (hasattr(self.tspipe_mode, 'value') and self.tspipe_mode.value == 0) or \
+                   (hasattr(self.tspipe_mode, 'name') and self.tspipe_mode.name == 'SELF_SUPERVISED_MOMENTUM'):
                     batches_lists = [batches_1, batches_2, batches_2, batches_1] # no clone needed here
                     asymmetric = False
                     assert view_target is None, "Self-supervised learning does not support labels."
                     batch_view_target = None
-                elif self.tspipe_mode == TSPipeMode.SUPERVISED_MOMENTUM:
+                elif self.tspipe_mode == TSPipeMode.SUPERVISED_MOMENTUM or \
+                     (hasattr(self.tspipe_mode, 'value') and self.tspipe_mode.value == 1) or \
+                     (hasattr(self.tspipe_mode, 'name') and self.tspipe_mode.name == 'SUPERVISED_MOMENTUM'):
                     batches_lists = [batches_1, batches_2] # no clone needed here
                     asymmetric = True
                     assert view_target is not None, "Supervised learning requires labels."
                     batch_view_target = Batch(view_target)
                 else:
-                    assert False, "Invalid Mode"
+                    assert False, f"Invalid Mode: {self.tspipe_mode} (type: {type(self.tspipe_mode)})"
                 batch_idx = self.batch_q.get_new_batch_id()
                 self.last_batch_idx = batch_idx
                 self.schedule_task(GpuTask(TaskType.TASK_FEED_BATCH, batch_idx, 0, 0, 0, 0, batch_list=batches_lists, asymmetric=asymmetric, label_batch=batch_view_target))

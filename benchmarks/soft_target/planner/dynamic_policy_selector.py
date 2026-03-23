@@ -4,6 +4,7 @@ Dynamic Policy Selector
 
 기존 단순 임계치 로직을 ETA 기반 최적 선택으로 대체
 """
+import os
 import time
 import logging
 from typing import Dict, List, Optional
@@ -60,7 +61,11 @@ class DynamicPolicySelector:
         
         # Configuration
         self.min_slowdown_threshold = 1.05   # 5% 이상 느려져야 고려
-        self.sustained_slowdown_duration = 30.0  # 30초 지속되어야 유효한 slowdown
+        # ✅ NEW: Allow environment override for testing (default 30.0s for production)
+        threshold_str = os.environ.get("FAILOVER_SLOWDOWN_THRESHOLD_SEC", "").strip()
+        self.sustained_slowdown_duration = float(threshold_str) if threshold_str else 30.0
+        if threshold_str and float(threshold_str) > 0:
+            self.logger.info(f"🧪 Slowdown duration threshold overridden: {self.sustained_slowdown_duration}s")
 
         # Timing
         self.last_eta_compute_ms: Optional[float] = None

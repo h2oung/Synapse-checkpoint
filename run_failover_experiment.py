@@ -18,10 +18,13 @@ from pathlib import Path
 import subprocess
 import json
 from datetime import datetime
+from typing import Optional
 import yaml
 
 # TSPipe 경로 추가
-sys.path.insert(0, '/home/wisekhy/tspipe/Synapse-private')
+REPO_ROOT = Path(__file__).resolve().parent
+BENCHMARK_DIR = REPO_ROOT / "benchmarks" / "soft_target"
+sys.path.insert(0, str(REPO_ROOT))
 
 from tspipe.failover_logger import init_experiment_logger, finalize_experiment_logger
 from tspipe.gpu_health_monitor import GPUHealthMonitor
@@ -197,8 +200,11 @@ class FailoverExperiment:
         # 4. 복구 과정 모니터링
         self._monitor_recovery_process()
 
-        # 4.5. 프로세스가 실패 코드로 종료되었으면 K-1 재시작 시도
-        if self.tspipe_process and self.tspipe_process.poll() is not None and self.tspipe_process.returncode != 0:
+        # 4.5. hard failover restart config가 생성되면 K-1 재시작 시도
+        if self._has_restart_config_available():
+            self._restart_from_failover_config_if_available()
+        elif self.tspipe_process and self.tspipe_process.poll() is not None and self.tspipe_process.returncode != 0:
+            # 레거시 경로 호환: 비정상 종료는 했지만 restart config가 없는 경우
             self._restart_from_failover_config_if_available()
         
         # 5. 복구 후 정상 동작 확인
@@ -257,10 +263,10 @@ class FailoverExperiment:
         """TSPipe를 failover 기능과 함께 시작"""
         print("🔧 TSPipe를 failover 기능과 함께 시작...")
         
-        benchmark_dir = "/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target"
+        benchmark_dir = str(BENCHMARK_DIR)
         
         cmd = [
-            "python", "train_kd_profiling.py",
+            sys.executable, "train_kd_profiling.py",
             "--img_root=/nas-ssd/datasets/imagenet2012/imagenet",
             "--save_root=./results/failover_test/",
             "--t_model=./results/base/base-i100-vit-large/model_best.pth.tar",
@@ -282,6 +288,7 @@ class FailoverExperiment:
             "--max_step_profiling=10",  # 20 -> 10으로 축소
             "--note=failover-experiment",
             "--soft-failover-enable",
+            "--soft-failover-auto-restart",
             # Failover 관련 옵션들
             "--failover-enable",
             "--failover-experiment", self.experiment_name,
@@ -589,7 +596,7 @@ class FailoverExperiment:
 
     def _restart_from_failover_config_if_available(self):
         """TSPipe가 실패 종료된 경우 restart_config 기반 K-1 재시작"""
-        restart_dir = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/results/failover_test/failover-experiment")
+        restart_dir = BENCHMARK_DIR / "results" / "failover_test" / "failover-experiment"
         emergency_path = restart_dir / "emergency_restart_config.json"
         legacy_path = restart_dir / "restart_config.json"
 
@@ -650,7 +657,7 @@ class FailoverExperiment:
                 print("⚠️ 사용할 CUDA_VISIBLE_DEVICES가 비어 있어 재시작 불가")
                 return
 
-            base_cfg_path = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/tspipe.yaml")
+            base_cfg_path = BENCHMARK_DIR / "tspipe.yaml"
             with open(base_cfg_path, 'r') as f:
                 cfg = yaml.safe_load(f)
 
@@ -664,7 +671,7 @@ class FailoverExperiment:
                 'visible_devices': visible_devices,
             }
 
-            restart_cfg_path = Path("/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target/tspipe_restart_kminus1.yaml")
+            restart_cfg_path = BENCHMARK_DIR / "tspipe_restart_kminus1.yaml"
             with open(restart_cfg_path, 'w') as f:
                 yaml.safe_dump(cfg, f, sort_keys=False)
 
@@ -674,6 +681,9 @@ class FailoverExperiment:
                 f"🔄 K-1 재시작 시도: failed_gpu={failed_gpu}, "
                 f"source={config_source}, CUDA_VISIBLE_DEVICES={cuda_visible}"
             )
+
+            # 부모가 살아있더라도 워커가 이미 붕괴한 상태일 수 있어 재시작 전에 정리한다.
+            self._stop_tspipe()
             self._start_tspipe_with_custom_config(str(restart_cfg_path), cuda_visible, checkpoint_path)
             self.restarted = True
 
@@ -693,23 +703,30 @@ class FailoverExperiment:
             print(f"❌ K-1 재시작 실패: {e}")
             self.logger.log_message("❌ K-1 재시작 실패", {'error': str(e)})
 
+    def _has_restart_config_available(self) -> bool:
+        """hard failover restart config 존재 여부 확인"""
+        restart_dir = BENCHMARK_DIR / "results" / "failover_test" / "failover-experiment"
+        emergency_path = restart_dir / "emergency_restart_config.json"
+        legacy_path = restart_dir / "restart_config.json"
+        return emergency_path.exists() or legacy_path.exists()
+
     def _start_tspipe_with_custom_config(self, config_path: str, cuda_visible_devices: str, resume_checkpoint: Optional[str] = None):
         """커스텀 tspipe config/CUDA 환경으로 재시작
 
         cuda_visible_devices 인자는 restart_config에서 가져온 논리 K-1 GPU 집합이지만,
         실제 물리 GPU 집합은 PINNED_GPU_SET (0,3,4,6)으로 고정한다.
         """
-        benchmark_dir = "/home/wisekhy/tspipe/Synapse-private/benchmarks/soft_target"
+        benchmark_dir = str(BENCHMARK_DIR)
         cmd = [
-            "python", "train_kd_profiling.py",
+            sys.executable, "train_kd_profiling.py",
             "--img_root=/nas-ssd/datasets/imagenet2012/imagenet",
             "--save_root=./results/failover_test/",
-            "--t_model=./results/base/base-i100-vit-base/teacher_init_vit_base.pth.tar",
-            "--s_init=./results/base/base-i100-resnet50/student_init_resnet50.pth.tar",
+            "--t_model=./results/base/base-i100-vit-large/model_best.pth.tar",
+            "--s_init=./results/base/base-i100-resnet152/initial_r152.pth.tar",
             "--kd_mode=st",
             "--lambda_kd=0.1",
-            "--t_name=vit_base",
-            "--s_name=resnet50",
+            "--t_name=vit_large",
+            "--s_name=resnet152",
             "--T=4.0",
             "--data_name=imagenet100",
             "--num_class=100",
@@ -723,6 +740,7 @@ class FailoverExperiment:
             "--max_step_profiling=10",
             "--note=failover-restart-kminus1",
             "--soft-failover-enable",
+            "--soft-failover-auto-restart",
         ]
 
         if resume_checkpoint:

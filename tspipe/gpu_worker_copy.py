@@ -194,8 +194,14 @@ class BaseWorker():
 
     @staticmethod
     def partition_id_to_device_id(partition_id: int) -> int:
-        device_count = torch.cuda.device_count()
-        return partition_id % device_count
+        import os
+        # 사용 가능한 GPU 개수 파악 (CUDA_VISIBLE_DEVICES 고려)
+        visible_gpus = os.environ.get('CUDA_VISIBLE_DEVICES', '')
+        if visible_gpus:
+            num_gpus = len([g.strip() for g in visible_gpus.split(',') if g.strip()])
+        else:
+            num_gpus = torch.cuda.device_count()
+        return partition_id % num_gpus
 
     @staticmethod
     def partition_id_to_internal_device_id(partition_id: int) -> int:

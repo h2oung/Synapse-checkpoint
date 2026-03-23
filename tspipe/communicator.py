@@ -33,16 +33,20 @@ def find_free_port(start_port=31101, max_attempts=1000):
 # 동적 포트 할당 (더 넓은 범위에서)
 import os
 
-# 환경변수에서 포트 얻기 (명시적으로 설정된 경우)
-if 'PYTORCH_DISTRIBUTED_NCCL_START_PORT' in os.environ:
-    _base_port = int(os.environ['PYTORCH_DISTRIBUTED_NCCL_START_PORT'])
-    PYTORCH_DISTRIBUTED_NCCL_PORT = _base_port
-    PYTORCH_DISTRIBUTED_RPC_PORT = _base_port + 100
-else:
-    # 기본값 사용
-    _base_port = 32768
-    PYTORCH_DISTRIBUTED_NCCL_PORT = find_free_port(start_port=_base_port)
-    PYTORCH_DISTRIBUTED_RPC_PORT = find_free_port(start_port=_base_port + 100)
+# 함수로 변경: 매 호출마다 환경변수 재읽기 (restart 시 새 포트값 적용)
+def _get_nccl_rpc_ports():
+    """Get NCCL and RPC ports from environment or defaults."""
+    if 'PYTORCH_DISTRIBUTED_NCCL_START_PORT' in os.environ:
+        _base_port = int(os.environ['PYTORCH_DISTRIBUTED_NCCL_START_PORT'])
+        return _base_port, _base_port + 100
+    else:
+        _base_port = 32768
+        nccl_p = find_free_port(start_port=_base_port)
+        rpc_p = find_free_port(start_port=_base_port + 100)
+        return nccl_p, rpc_p
+
+# 초기값 설정
+PYTORCH_DISTRIBUTED_NCCL_PORT, PYTORCH_DISTRIBUTED_RPC_PORT = _get_nccl_rpc_ports()
 
 
 class TensorPlaceholder:
@@ -611,12 +615,10 @@ class Communicator:
 
         # 🔻 RPC shutdown은 모든 노드에서 반드시 호출되어야 함
         if rpc._is_current_rpc_agent_set():
-            print(f"[Rank {self.rank}] Shutting down RPC agent...")
             try:
-                rpc.shutdown()
-            except Exception as e:
-                print(f"[Rank {self.rank}] RPC shutdown error: {e}")
-            print(f"[Rank {self.rank}] RPC agent shutdown complete.")
+                rpc.shutdown(timeout=0.5)  # 최소 오버헤드: 0.5초 타임아웃
+            except Exception:
+                pass  # timeout/error 무시하고 계속
 
         print(f"[Rank {self.rank}] Finish OK")
 

@@ -29,18 +29,21 @@ class SlowdownDetector:
     def __init__(self, 
                  baseline_window: int = 10,
                  detection_window: int = 5,
-                 slowdown_threshold: float = 1.05):
+                 slowdown_threshold: float = 1.05,
+                 inject_scenario: str = ""):
         """
         Args:
             baseline_window: Baseline 설정할 초기 배치 수 (첫 20개)
             detection_window: Slowdown 판단할 최근 배치 수 (최근 10개)
             slowdown_threshold: Slowdown 감지 임계값 (5% 이상)
+            inject_scenario: Synthetic slowdown scenario ("KEEP_REPLAN_DEGRADE" for testing)
         """
         self.logger = logging.getLogger(f"{__name__}.SlowdownDetector")
         
         self.baseline_window = baseline_window
         self.detection_window = detection_window
         self.slowdown_threshold = slowdown_threshold
+        self.inject_scenario = inject_scenario.strip()
         
         # Stage time 저장 (최대 detection_window개 유지)
         self.stage_times = deque(maxlen=max(baseline_window, detection_window))
@@ -53,7 +56,17 @@ class SlowdownDetector:
         self.batch_count = 0
         self.slowdown_detected_at_step = None
         
-        self.logger.info("✅ SlowdownDetector initialized")
+        # ✅ NEW: Synthetic slowdown injection state
+        self._inject_start_batch = baseline_window + detection_window  # Start injecting after baseline + detection window
+        self._inject_slowdown_multiplier = 1.3  # 30% slowdown
+        
+        if self.inject_scenario:
+            self.logger.info(
+                f"🧪 SlowdownDetector: Synthetic scenario enabled: {self.inject_scenario} "
+                f"(will start at batch {self._inject_start_batch}, mult={self._inject_slowdown_multiplier}x)"
+            )
+        else:
+            self.logger.info("✅ SlowdownDetector initialized")
     
     def record_stage_time(self, stage_time_ms: float):
         """
@@ -62,6 +75,17 @@ class SlowdownDetector:
         Args:
             stage_time_ms: 이번 배치의 max stage time (ms단위)
         """
+        # ✅ NEW: Apply synthetic slowdown injection if scenario enabled
+        original_stage_time = stage_time_ms
+        if self.inject_scenario and self.batch_count >= self._inject_start_batch:
+            if "KEEP_REPLAN_DEGRADE" in self.inject_scenario or "REPLAN" in self.inject_scenario or "DEGRADE" in self.inject_scenario:
+                # Inject continuous slowdown (progressive degradation)
+                stage_time_ms = stage_time_ms * self._inject_slowdown_multiplier
+                self.logger.debug(
+                    f"🧪 Batch {self.batch_count}: Injected slowdown "
+                    f"{original_stage_time:.2f}ms -> {stage_time_ms:.2f}ms (×{self._inject_slowdown_multiplier})"
+                )
+        
         self.stage_times.append(stage_time_ms)
         self.batch_count += 1
         

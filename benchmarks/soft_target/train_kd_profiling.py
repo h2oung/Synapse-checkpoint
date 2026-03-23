@@ -138,10 +138,15 @@ def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
     """Read option value from parse_known_args() leftovers (same helper as train_kd.py)."""
     for idx, token in enumerate(unparsed_args):
         if token == name and idx + 1 < len(unparsed_args):
-            return unparsed_args[idx + 1]
+            value = unparsed_args[idx + 1]
+            logging.error(f"🔍 Extracted {name} (space-separated): {value}")
+            return value
         prefix = f"{name}="
         if token.startswith(prefix):
-            return token[len(prefix):]
+            value = token[len(prefix):]
+            logging.error(f"🔍 Extracted {name} (equals-style): {value}")
+            return value
+    logging.error(f"🔍 Failed to extract {name} from unparsed_args: {unparsed_args}")
     return None
 
 
@@ -171,6 +176,18 @@ def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict
 
     with open(tspipe_config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+    
+    # ✅ NEW: Verify YAML was written correctly
+    logging.error(f"🔧 YAML partition updated: {tspipe_config_path}")
+    logging.error(f"   New snet_partition: {cfg['tspipe']['model_split']['online']}")
+    logging.error(f"   New tnet_partition: {cfg['tspipe']['model_split']['target']}")
+    
+    # Verify file was actually created/modified
+    if os.path.exists(tspipe_config_path):
+        logging.error(f"✅ YAML file verified to exist: {tspipe_config_path}")
+    else:
+        logging.error(f"❌ ERROR: YAML file was not created!")
+        return
 
 
 def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimizer):
@@ -198,7 +215,13 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
         )
         return {"enabled": False, "resume_step": 0, "partition": None}
 
-    _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+    # ✅ NEW: Apply new partition to YAML if restart payload has one
+    if restart_payload.get("partition"):
+        logging.error("🔄 Failover restart detected. Applying new partition to YAML...")
+        _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+        logging.error("✅ YAML partition application completed")
+    else:
+        logging.warning("⚠️ Restart payload missing partition data. YAML not updated.")
 
     checkpoint_path = restart_payload.get("checkpoint_path") or os.path.join(
         save_root, "failover_checkpoint_latest.pth"

@@ -88,9 +88,18 @@ parser.add_argument('--init_var', type=float, default=5.0, help='initial varianc
 parser.add_argument('--att_f', type=float, default=1.0, help='attention factor of mid_channels for AFD')
 parser.add_argument('--dryrun-failover-cycle', action='store_true', default=False,
                     help='Run deterministic failover restart/resume dry-run without real training data')
+parser.add_argument('--failover-inject-scenario', type=str, default='',
+                    help='Inject synthetic slowdown scenario (e.g., KEEP_REPLAN_DEGRADE) for testing failover policies')
 
 
 args, unparsed = parser.parse_known_args()
+
+# ✅ NEW: Read FAILOVER_INJECT_SCENARIO from environment variable (for E2E launcher compatibility)
+if not args.failover_inject_scenario:
+    args.failover_inject_scenario = os.environ.get("FAILOVER_INJECT_SCENARIO", "").strip()
+
+if args.failover_inject_scenario:
+    logging.info(f"🧪 FAILOVER_INJECT_SCENARIO enabled: {args.failover_inject_scenario}")
 
 args.save_root = os.path.join(args.save_root, args.note)
 create_exp_dir(args.save_root)
@@ -116,10 +125,15 @@ def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
     """Read option value from parse_known_args() leftovers."""
     for idx, token in enumerate(unparsed_args):
         if token == name and idx + 1 < len(unparsed_args):
-            return unparsed_args[idx + 1]
+            value = unparsed_args[idx + 1]
+            logging.error(f"🔍 Extracted {name} (space-separated): {value}")
+            return value
         prefix = f"{name}="
         if token.startswith(prefix):
-            return token[len(prefix):]
+            value = token[len(prefix):]
+            logging.error(f"🔍 Extracted {name} (equals-style): {value}")
+            return value
+    logging.error(f"🔍 Failed to extract {name} from unparsed_args: {unparsed_args}")
     return None
 
 
@@ -155,10 +169,27 @@ def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict
 
     with open(tspipe_config_path, "w", encoding="utf-8") as f:
         yaml.safe_dump(cfg, f, sort_keys=False)
+    
+    # ✅ NEW: Verify YAML was written correctly
+    logging.error(f"🔧 YAML partition updated: {tspipe_config_path}")
+    logging.error(f"   New snet_partition: {cfg['tspipe']['model_split']['online']}")
+    logging.error(f"   New tnet_partition: {cfg['tspipe']['model_split']['target']}")
+    
+    # Verify file was actually created/modified
+    if os.path.exists(tspipe_config_path):
+        logging.error(f"✅ YAML file verified to exist: {tspipe_config_path}")
+    else:
+        logging.error(f"❌ ERROR: YAML file was not created!")
+        return
 
 
-def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimizer, steps_per_epoch: int):
-    """Load restart_config/checkpoint and return resume info for failover restart."""
+def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimizer, steps_per_epoch: int, skip_partition_yaml_apply=False, skip_checkpoint_restore=False):
+    """Load restart_config/checkpoint and return resume info for failover restart.
+    
+    Args:
+        skip_partition_yaml_apply: True면 YAML 파일 수정 건너뜀 (이미 첫 번째 호출에서 한 경우)
+        skip_checkpoint_restore: True면 checkpoint 로드 건너뜀 (이미 첫 번째 호출에서 한 경우)
+    """
     failover_restart_path = os.path.join(save_root, "failover_restart_config.json")
     emergency_restart_path = os.path.join(save_root, "emergency_restart_config.json")
     legacy_restart_path = os.path.join(save_root, "restart_config.json")
@@ -237,10 +268,38 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
                     "beta_comm": None,
                 }
 
-    _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+    # ✅ Apply new partition to YAML if restart payload has one (but skip if already applied in first call)
+    if restart_payload.get("partition") and not skip_partition_yaml_apply:
+        logging.error("🔄 Failover restart detected. Applying new partition to YAML...")
+        _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload)
+        logging.error("✅ YAML partition application completed")
+    elif restart_payload.get("partition") and skip_partition_yaml_apply:
+        logging.info("↪️  Partition already applied in first load; skipping YAML update on second call")
+    else:
+        logging.warning("⚠️ Restart payload missing partition data. YAML not updated.")
 
     checkpoint_path = restart_payload.get("checkpoint_path") or os.path.join(save_root, "failover_checkpoint_latest.pth")
     resume_step = int(restart_payload.get("step_id", 0))
+
+    # Early return if checkpoint restore is skipped (already done in first call)
+    if skip_checkpoint_restore:
+        partition = restart_payload.get("partition", {})
+        partition_cfg = None
+        if isinstance(partition.get("snet_partition"), list) and isinstance(partition.get("tnet_partition"), list):
+            partition_cfg = PartitionConfig(
+                snet_partition=partition["snet_partition"],
+                tnet_partition=partition["tnet_partition"],
+                gpu_assignment=partition.get("gpu_assignment", list(range(len(partition["snet_partition"])))),
+            )
+        return {
+            "enabled": True,
+            "resume_step": resume_step,
+            "resume_epoch": int(restart_payload.get("epoch_id", 1)),
+            "resume_batch_offset": int(restart_payload.get("batch_offset", 0)),
+            "partition": partition_cfg,
+            "alpha_comp": None,  # Skip alpha/beta on second call
+            "beta_comm": None,
+        }
 
     def _load_state_dict_compat(model, state_dict, model_name: str) -> bool:
         """Load checkpoint state dict across common prefix variants (module./resnet.)."""
@@ -318,6 +377,21 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
         if "beta_comm" in ckpt:
             beta_comm_restored = {int(k): float(v) for k, v in ckpt["beta_comm"].items()}
             logging.info(f"✅ Restored beta_comm from checkpoint: {beta_comm_restored}")
+        
+        # 또한 emergency_restart_config.json에서도 alpha/beta를 로드
+        emergency_config_path = os.path.join(save_root, 'emergency_restart_config.json')
+        if os.path.exists(emergency_config_path):
+            try:
+                with open(emergency_config_path, 'r') as f:
+                    emergency_config = json.load(f)
+                if "alpha_comp" in emergency_config and alpha_comp_restored is None:
+                    alpha_comp_restored = {int(k): float(v) for k, v in emergency_config["alpha_comp"].items()}
+                    logging.info(f"✅ Restored alpha_comp from emergency config: {alpha_comp_restored}")
+                if "beta_comm" in emergency_config and beta_comm_restored is None:
+                    beta_comm_restored = {int(k): float(v) for k, v in emergency_config["beta_comm"].items()}
+                    logging.info(f"✅ Restored beta_comm from emergency config: {beta_comm_restored}")
+            except Exception as e:
+                logging.warning(f"⚠️ Failed to load emergency config: {e}")
     else:
         logging.warning(f"restart_config found but checkpoint missing: {checkpoint_path}")
 
@@ -437,6 +511,20 @@ def main():
     global niter, _resume_target_epoch, _resume_batches_to_skip
     logging.info("args = %s", args)
     logging.info("unparsed_args = %s", unparsed)
+
+    # [Port Setup] Use environment variable set by launcher (run_e2e_failover.sh)
+    # CRITICAL: Do NOT call find_free_port() here - it would override the launcher's port!
+    # The launcher sets PYTORCH_DISTRIBUTED_NCCL_START_PORT per restart iteration.
+    # Port spacing: 31200, 31300, 31400... (increment of 100) to avoid TIME_WAIT conflicts
+    try:
+        import os
+        nccl_port = os.environ.get('PYTORCH_DISTRIBUTED_NCCL_START_PORT')
+        if nccl_port:
+            logging.info(f"✅ [Port Setup] Using launcher-provided NCCL port: {nccl_port} (spacing=100, expected sequence: 31200, 31300, 31400...)")
+        else:
+            logging.warning(f"⚠️ [Port Setup] No NCCL port from launcher, tspipe.communicator will allocate default")
+    except Exception as e:
+        logging.warning(f"Port check (non-fatal): {e}")
 
     if args.dryrun_failover_cycle:
         _run_dryrun_failover_cycle()
@@ -567,6 +655,7 @@ def main():
                                     nesterov = True)
 
         # Re-load bootstrap state on the final (sequential) model/optimizer objects.
+        # ⚠️ Skip YAML update AND checkpoint restore: already applied in first call above
         bootstrap = _load_failover_bootstrap(
             save_root=args.save_root,
             unparsed_args=unparsed,
@@ -574,6 +663,8 @@ def main():
             tnet=tnet,
             optimizer=optimizer,
             steps_per_epoch=len(train_loader),
+            skip_partition_yaml_apply=True,
+            skip_checkpoint_restore=True,
         )
         niter = int(bootstrap["resume_step"])
         start_epoch = int(bootstrap["resume_epoch"])
@@ -596,7 +687,7 @@ def main():
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
         
         # NEW: Initialize slowdown detection and failover policy components
-        slowdown_detector = SlowdownDetector()
+        slowdown_detector = SlowdownDetector(inject_scenario=args.failover_inject_scenario)
         
         # ✅ Step 1: Pass YAML partition config to optimizer to sync initial state
         # This ensures failover decisions use the actual runtime partition from start
@@ -617,10 +708,11 @@ def main():
         if failover_optimizer is not None and bootstrap["partition"] is not None:
             failover_optimizer.current_partition = bootstrap["partition"]
             
-            # ✅ NEW: Restore alpha/beta coefficients from checkpoint
+            # ✅ NEW: Restore alpha/beta coefficients from checkpoint or emergency config
             if bootstrap["alpha_comp"] is not None:
                 failover_optimizer.alpha_g = bootstrap["alpha_comp"]
                 logging.error(f"🔄 Restored alpha_g from checkpoint: {failover_optimizer.alpha_g}")
+            
             if bootstrap["beta_comm"] is not None:
                 failover_optimizer.beta_g = bootstrap["beta_comm"]
                 logging.error(f"🔄 Restored beta_g from checkpoint: {failover_optimizer.beta_g}")
@@ -1005,6 +1097,38 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                 slowdown_ratio = 1.0
                 slow_gpu_id = 0
 
+            # 🔬 TEST-ONLY: Synthetic slowdown injection for E2E failover demos.
+            # FAILOVER_INJECT_SCENARIO=KEEP_REPLAN_DEGRADE 으로 설정하면,
+            # 전역 step niter 범위별로 slowdown_ratio를 최소값으로 강제로 올립니다.
+            #   - 30 <= niter < 40: >= 1.03  (KEEP 구간, 임계값 아래라 정책 미발동 기대)
+            #   - 40 <= niter < 60: >= 1.30  (REPLAN 유도 구간)
+            #   - 60 <= niter < 80: >= 3.00  (DEGRADE 유도 구간)
+            inject_scenario = getattr(args, "failover_inject_scenario", "") or os.environ.get(
+                "FAILOVER_INJECT_SCENARIO", ""
+            ).strip()
+            if inject_scenario == "KEEP_REPLAN_DEGRADE":
+                injected_min = None
+                phase_label = None
+                if 30 <= niter < 40:
+                    injected_min = 1.03
+                    phase_label = "KEEP"
+                elif 40 <= niter < 60:
+                    injected_min = 1.30
+                    phase_label = "REPLAN"
+                elif 60 <= niter < 80:
+                    injected_min = 3.00
+                    phase_label = "DEGRADE"
+
+                if injected_min is not None:
+                    # 실제 측정된 slowdown보다 작으면 올려주고, 더 크면 그대로 둡니다.
+                    slowdown_ratio = max(slowdown_ratio, injected_min)
+                    slow_gpu_id = 0
+                    logging.info(
+                        f"🧪 Injected synthetic slowdown scenario {inject_scenario} "
+                        f"(phase={phase_label}) at step {niter}: "
+                        f"gpu={slow_gpu_id}, slowdown={slowdown_ratio:.2f}x"
+                    )
+
             _SLOWDOWN_TRIGGER = 1.10  # 스펙 4절 1단계 임계값
             if slowdown_ratio > _SLOWDOWN_TRIGGER:
                 logging.info(
@@ -1149,6 +1273,55 @@ if __name__ == '__main__':
         except SystemExit as e:
             if e.code == 42:
                 logging.error("🔄 Failover detected (exit code 42), restarting main()...")
+                # Comprehensive cleanup before restart
+                try:
+                    import torch.distributed.rpc as rpc
+                    import torch.distributed as dist
+                    
+                    logging.info("🧹 Cleaning up distributed state...")
+                    
+                    # 1. RPC shutdown (120s timeout to allow thread pool drain)
+                    try:
+                        rpc.shutdown(timeout=120.0)
+                        logging.info("✅ RPC shutdown completed")
+                    except Exception as e:
+                        logging.warning(f"RPC shutdown (non-fatal): {e}")
+                    
+                    # 2. Process group cleanup
+                    try:
+                        if dist.is_available() and dist.is_initialized():
+                            dist.destroy_process_group()
+                            logging.info("✅ Process group destroyed")
+                    except Exception as e:
+                        logging.warning(f"Process group destroy (non-fatal): {e}")
+                    
+                    # 3. [INFO] Port is controlled by run_e2e_failover.sh launcher for each restart
+                    # We do NOT set port here - that's the launcher's job.
+                    # Launcher uses port spacing=100 to avoid TIME_WAIT conflicts
+                    # Expected: RESTART_COUNT=0→31200, 1→31300, 2→31400, etc.
+                    try:
+                        import os
+                        # Just verify port is still set from launcher (updated per restart iteration)
+                        nccl_port_current = os.environ.get('PYTORCH_DISTRIBUTED_NCCL_START_PORT')
+                        if nccl_port_current:
+                            logging.info(f"✅ [Cleanup] NCCL port from launcher: {nccl_port_current} (will be updated to next iteration: +100)")
+                        else:
+                            logging.warning(f"⚠️ [Cleanup] NCCL port not found in env, launcher should set it for next restart")
+                        
+                        # NOTE: Module reload is dangerous due to singleton patterns and module-level state.
+                        # Instead, let main() restart naturally pick up new environment.
+                    except Exception as e:
+                        logging.warning(f"Port check (non-fatal): {e}")
+                    
+                    # 4. Wait for OS socket cleanup (TIME_WAIT state resolution)
+                    # 30초: 충분한 대기 시간으로 모든 NCCL/RPC 소켓 정리 보장
+                    # Launcher uses port spacing=100 (31200, 31300, 31400...) for each restart
+                    time.sleep(30.0)
+                    logging.info("✅ Distributed state cleanup completed (waited 30s for socket cleanup, launcher using port spacing=100)")
+                    
+                except Exception as cleanup_error:
+                    logging.error(f"⚠️ Cleanup error (continuing anyway): {cleanup_error}")
+                
                 continue  # ← main() 재호출
             else:
                 raise  # 다른 exit code는 그냥 종료

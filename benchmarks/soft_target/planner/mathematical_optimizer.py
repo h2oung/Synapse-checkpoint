@@ -438,14 +438,25 @@ class MathematicalFailoverOptimizer:
         t_base = float(costs.T_base)
         replan_overhead = 4.37 + 50.0 * t_base
 
+        # DEGRADE 정책: 현재 gpu_assignment과 일치하는 alpha/beta만 저장
+        alpha_to_save = self.alpha_g
+        beta_to_save = self.beta_g
+        if recommended_policy == "DEGRADE" and self.current_partition is not None:
+            # DEGRADE 시: 남은 GPU들의 alpha/beta만 저장
+            alpha_to_save = {gpu: self.alpha_g.get(gpu, 0.5) 
+                           for gpu in self.current_partition.gpu_assignment}
+            beta_to_save = {gpu: self.beta_g.get(gpu, 1.0) 
+                          for gpu in self.current_partition.gpu_assignment}
+            self.logger.error(f"🔧 DEGRADE: Filtered alpha/beta to {list(alpha_to_save.keys())}")
+        
         payload = {
             "timestamp": time.time(),
             "step_id": int(self.progress_tracker.progress.current_step),
             "gpu_id": int(gpu_id),
             "slowdown": float(current_slowdown),
             "recommended_policy": str(recommended_policy),
-            "alpha_comp": {int(k): float(v) for k, v in self.alpha_g.items()},
-            "beta_comm": {int(k): float(v) for k, v in self.beta_g.items()},
+            "alpha_comp": {int(k): float(v) for k, v in alpha_to_save.items()},
+            "beta_comm": {int(k): float(v) for k, v in beta_to_save.items()},
             "current_step_time": float(self._estimate_current_step_time()),
             "t_base": t_base,
             "eta": {
@@ -649,7 +660,7 @@ class MathematicalFailoverOptimizer:
             beta = self.beta_g.get(gpu_id, 1.0)
             slowdown = max(alpha, beta)
             
-            if slowdown > max_slowdown:
+            if slowdown >= max_slowdown:
                 max_slowdown = slowdown
                 slow_gpu_id = gpu_id
         
