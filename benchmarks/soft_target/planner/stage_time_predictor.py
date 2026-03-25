@@ -39,7 +39,8 @@ class StageTimePredictor:
                  snet_profile_path: str = './benchmarks/soft_target/planner/profile/snet.csv',
                  tnet_profile_path: str = './benchmarks/soft_target/planner/profile/tnet.csv',
                  bandwidth_gbps: float = 8.0,
-                 alpha_beta_path: Optional[str] = None):
+                 alpha_beta_path: Optional[str] = None,
+                 suppress_alpha_beta_log: bool = False):
         self.logger = logging.getLogger(f"{__name__}.StageTimePredictor")
         
         # Load profiling data
@@ -61,7 +62,7 @@ class StageTimePredictor:
         self.alpha_g = {}
         self.beta_g = {}
         try:
-            self._load_or_generate_alpha_beta(self.alpha_beta_path)
+            self._load_or_generate_alpha_beta(self.alpha_beta_path, suppress=suppress_alpha_beta_log)
         except Exception as e:
             self.logger.warning(f"Alpha/beta load/generate failed: {e}")
     
@@ -130,7 +131,7 @@ class StageTimePredictor:
         
         return StageTimeInfo(T_keep=T_keep, T_replan=T_replan, T_degrade=T_degrade)
 
-    def _load_or_generate_alpha_beta(self, path: Optional[str] = None):
+    def _load_or_generate_alpha_beta(self, path: Optional[str] = None, suppress: bool = False):
         """
         Initialize ratio-only alpha/beta defaults.
 
@@ -142,10 +143,11 @@ class StageTimePredictor:
         self.alpha_g = {i: 1.0 for i in range(num_gpus)}
         self.beta_g = {i: 1.0 for i in range(num_gpus)}
 
-        self.logger.info(
-            "✅ Alpha-Beta initialized with ratio-only defaults "
-            "(alpha=1.0, beta=1.0)"
-        )
+        if not suppress:
+            self.logger.info(
+                "✅ Alpha-Beta initialized with ratio-only defaults "
+                "(alpha=1.0, beta=1.0)"
+            )
     
     def _calculate_keep_stage_time(self, 
                                   gpu_states: List[GPUPerformanceState],

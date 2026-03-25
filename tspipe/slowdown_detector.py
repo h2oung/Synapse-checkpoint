@@ -56,17 +56,11 @@ class SlowdownDetector:
         self.batch_count = 0
         self.slowdown_detected_at_step = None
         
-        # ✅ NEW: Synthetic slowdown injection state
-        self._inject_start_batch = baseline_window + detection_window  # Start injecting after baseline + detection window
-        self._inject_slowdown_multiplier = 1.3  # 30% slowdown
-        
-        if self.inject_scenario:
-            self.logger.info(
-                f"🧪 SlowdownDetector: Synthetic scenario enabled: {self.inject_scenario} "
-                f"(will start at batch {self._inject_start_batch}, mult={self._inject_slowdown_multiplier}x)"
-            )
-        else:
-            self.logger.info("✅ SlowdownDetector initialized")
+        # NOTE: 이전 버전에서는 여기서 stage_time_ms에 인위적 배수를 곱해
+        # slowdown을 "측정값만" 속였지만, 실제 wall-clock 기반 실험에서는
+        # train_kd.py 쪽에서 직접 time.sleep을 이용해 지연을 주입하므로
+        # 여기서는 synthetic multiplier를 사용하지 않습니다.
+        self.logger.info("✅ SlowdownDetector initialized")
     
     def record_stage_time(self, stage_time_ms: float):
         """
@@ -75,17 +69,6 @@ class SlowdownDetector:
         Args:
             stage_time_ms: 이번 배치의 max stage time (ms단위)
         """
-        # ✅ NEW: Apply synthetic slowdown injection if scenario enabled
-        original_stage_time = stage_time_ms
-        if self.inject_scenario and self.batch_count >= self._inject_start_batch:
-            if "KEEP_REPLAN_DEGRADE" in self.inject_scenario or "REPLAN" in self.inject_scenario or "DEGRADE" in self.inject_scenario:
-                # Inject continuous slowdown (progressive degradation)
-                stage_time_ms = stage_time_ms * self._inject_slowdown_multiplier
-                self.logger.debug(
-                    f"🧪 Batch {self.batch_count}: Injected slowdown "
-                    f"{original_stage_time:.2f}ms -> {stage_time_ms:.2f}ms (×{self._inject_slowdown_multiplier})"
-                )
-        
         self.stage_times.append(stage_time_ms)
         self.batch_count += 1
         

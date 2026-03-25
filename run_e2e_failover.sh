@@ -61,6 +61,9 @@ mkdir -p "${RUN_DIR}"
 echo "[E2E] BASE_SAVE_ROOT=${BASE_SAVE_ROOT} RUN_NOTE=${RUN_NOTE} RUN_DIR=${RUN_DIR}"
 echo "[E2E] Starting failover loop..."
 
+# Measure end-to-end wall-clock time across all restarts
+E2E_START_TIME=$(date +%s)
+
 while true; do
   GPU_ASSIGNMENT=""
   NUM_GPUS=0
@@ -209,6 +212,14 @@ PY
   echo "[E2E] train_kd.py exited with code ${EXIT_CODE}"
 
   if [[ "${EXIT_CODE}" -eq 0 ]]; then
+    E2E_END_TIME=$(date +%s)
+    E2E_ELAPSED_SEC=$((E2E_END_TIME - E2E_START_TIME))
+    if [[ ${E2E_ELAPSED_SEC} -lt 0 ]]; then
+      E2E_ELAPSED_SEC=0
+    fi
+    E2E_ELAPSED_MIN=$((E2E_ELAPSED_SEC / 60))
+    E2E_ELAPSED_REM=$((E2E_ELAPSED_SEC % 60))
+    echo "[E2E] Total wall-clock time: ${E2E_ELAPSED_SEC}s (${E2E_ELAPSED_MIN}m ${E2E_ELAPSED_REM}s)"
     echo "[E2E] Training completed normally. Exiting launcher."
     break
   fi

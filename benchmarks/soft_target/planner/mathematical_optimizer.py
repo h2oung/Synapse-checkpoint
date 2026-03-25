@@ -113,7 +113,8 @@ class MathematicalFailoverOptimizer:
         self._latest_comm_time: Dict[int, float] = {}
 
         # Runtime DP partitioner used at REPLAN/DEGRADE execution time.
-        self._runtime_stage_time_predictor = StageTimePredictor()
+        suppress_log = initial_partition_config is not None
+        self._runtime_stage_time_predictor = StageTimePredictor(suppress_alpha_beta_log=suppress_log)
         self._sync_runtime_profile_with_partition()
 
         # Restart-based failover automation hooks (optional).

@@ -1,0 +1,64 @@
+{
+  "experiment_info": {
+    "name": "failover_basic_20260323_150533",
+    "id": "failover_basic_20260323_150533_20260323_150543",
+    "duration_seconds": 44.3317,
+    "start_time": "2026-03-23T15:05:43.875719",
+    "end_time": "2026-03-23T15:06:28.207674"
+  },
+  "failover_statistics": {
+    "total_failures": 1,
+    "total_recoveries": 0,
+    "avg_recovery_time_ms": 0.0,
+    "failure_gpu_ids": [
+      2
+    ]
+  },
+  "performance_statistics": {
+    "total_metrics_collected": 180,
+    "avg_cpu_usage_percent": 28.289999999999978,
+    "gpu_utilization_summary": {
+      "0": {
+        "avg_utilization": 22.344444444444445,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "1": {
+        "avg_utilization": 99.32222222222222,
+        "max_utilization": 100,
+        "min_utilization": 98
+      },
+      "2": {
+        "avg_utilization": 46.23888888888889,
+        "max_utilization": 47,
+        "min_utilization": 37
+      },
+      "3": {
+        "avg_utilization": 48.016666666666666,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "4": {
+        "avg_utilization": 51.02777777777778,
+        "max_utilization": 55,
+        "min_utilization": 42
+      },
+      "5": {
+        "avg_utilization": 49.477777777777774,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "6": {
+        "avg_utilization": 0.07222222222222222,
+        "max_utilization": 4,
+        "min_utilization": 0
+      }
+    }
+  },
+  "file_locations": {
+    "main_log": "./results/failover_e2e_0323_rerun3/failover_basic_20260323_150533_20260323_150543/experiment.log",
+    "performance_data": "./results/failover_e2e_0323_rerun3/failover_basic_20260323_150533_20260323_150543/performance.jsonl",
+    "failover_events": "./results/failover_e2e_0323_rerun3/failover_basic_20260323_150533_20260323_150543/failover_events.jsonl",
+    "plots_directory": "./results/failover_e2e_0323_rerun3/failover_basic_20260323_150533_20260323_150543/plots"
+  }
+}

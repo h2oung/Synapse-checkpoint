@@ -1,0 +1,64 @@
+{
+  "experiment_info": {
+    "name": "failover_basic_20260323_145419",
+    "id": "failover_basic_20260323_145419_20260323_145429",
+    "duration_seconds": 46.023456,
+    "start_time": "2026-03-23T14:54:29.847402",
+    "end_time": "2026-03-23T14:55:15.871079"
+  },
+  "failover_statistics": {
+    "total_failures": 1,
+    "total_recoveries": 0,
+    "avg_recovery_time_ms": 0.0,
+    "failure_gpu_ids": [
+      2
+    ]
+  },
+  "performance_statistics": {
+    "total_metrics_collected": 185,
+    "avg_cpu_usage_percent": 40.65675675675676,
+    "gpu_utilization_summary": {
+      "0": {
+        "avg_utilization": 58.556756756756755,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "1": {
+        "avg_utilization": 99.3945945945946,
+        "max_utilization": 100,
+        "min_utilization": 98
+      },
+      "2": {
+        "avg_utilization": 46.016216216216215,
+        "max_utilization": 49,
+        "min_utilization": 23
+      },
+      "3": {
+        "avg_utilization": 47.37837837837838,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "4": {
+        "avg_utilization": 50.627027027027026,
+        "max_utilization": 55,
+        "min_utilization": 25
+      },
+      "5": {
+        "avg_utilization": 49.81621621621622,
+        "max_utilization": 100,
+        "min_utilization": 0
+      },
+      "6": {
+        "avg_utilization": 0.043243243243243246,
+        "max_utilization": 4,
+        "min_utilization": 0
+      }
+    }
+  },
+  "file_locations": {
+    "main_log": "./results/failover_e2e_0323/failover_basic_20260323_145419_20260323_145429/experiment.log",
+    "performance_data": "./results/failover_e2e_0323/failover_basic_20260323_145419_20260323_145429/performance.jsonl",
+    "failover_events": "./results/failover_e2e_0323/failover_basic_20260323_145419_20260323_145429/failover_events.jsonl",
+    "plots_directory": "./results/failover_e2e_0323/failover_basic_20260323_145419_20260323_145429/plots"
+  }
+}

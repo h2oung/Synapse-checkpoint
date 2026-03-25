@@ -150,36 +150,70 @@ def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict
     if not isinstance(snet_partition, list) or not isinstance(tnet_partition, list):
         logging.warning("failover restart payload missing snet/tnet partition lists; skip YAML override")
         return
+    # Build inline list strings (e.g., "[8, 4, 4, 14]")
+    snet_inline = ", ".join(str(int(v)) for v in snet_partition)
+    tnet_inline = ", ".join(str(int(v)) for v in tnet_partition)
 
-    with open(tspipe_config_path, "r", encoding="utf-8") as f:
-        cfg = yaml.safe_load(f) or {}
-    cfg.setdefault("tspipe", {})
-    cfg["tspipe"].setdefault("model_split", {})
-    cfg["tspipe"]["model_split"]["online"] = [int(v) for v in snet_partition]
-    cfg["tspipe"]["model_split"]["target"] = [int(v) for v in tnet_partition]
+    try:
+        with open(tspipe_config_path, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except FileNotFoundError:
+        logging.error(f"❌ tspipe config YAML not found: {tspipe_config_path}")
+        return
 
-    # Preserve detailed restart metadata for audit/debug.
-    cfg["tspipe"]["failover_restart"] = {
-        "gpu_assignment": partition.get("gpu_assignment", []),
-        "snet_stage_boundaries": partition.get("snet_stage_boundaries", []),
-        "tnet_stage_boundaries": partition.get("tnet_stage_boundaries", []),
-        "trigger_policy": restart_payload.get("trigger_policy"),
-        "step_id": restart_payload.get("step_id", 0),
-    }
+    new_lines = []
+    inside_model_split = False
+    model_split_indent = ""
+    online_updated = False
+    target_updated = False
+
+    for line in lines:
+        stripped = line.lstrip()
+        indent = line[: len(line) - len(stripped)]
+
+        # Enter model_split block (under tspipe) and remember its indent
+        if stripped.startswith("model_split:") and not inside_model_split:
+            inside_model_split = True
+            model_split_indent = indent
+            new_lines.append(line)
+            continue
+
+        # If we were inside model_split and indentation goes back, we've exited the block
+        if inside_model_split and stripped and not stripped.startswith("#"):
+            if len(indent) <= len(model_split_indent):
+                inside_model_split = False
+
+        if inside_model_split:
+            # Replace online/target lines only inside the model_split block
+            if stripped.startswith("online:") and not online_updated:
+                new_lines.append(f"{indent}online: [{snet_inline}]\n")
+                online_updated = True
+                continue
+            if stripped.startswith("target:") and not target_updated:
+                new_lines.append(f"{indent}target: [{tnet_inline}]\n")
+                target_updated = True
+                continue
+
+        new_lines.append(line)
+
+    if not (online_updated and target_updated):
+        logging.error(
+            f"❌ Failed to update model_split.online/target in YAML (online_updated={online_updated}, "
+            f"target_updated={target_updated}): {tspipe_config_path}"
+        )
+        return
 
     with open(tspipe_config_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg, f, sort_keys=False)
-    
-    # ✅ NEW: Verify YAML was written correctly
-    logging.error(f"🔧 YAML partition updated: {tspipe_config_path}")
-    logging.error(f"   New snet_partition: {cfg['tspipe']['model_split']['online']}")
-    logging.error(f"   New tnet_partition: {cfg['tspipe']['model_split']['target']}")
-    
-    # Verify file was actually created/modified
+        f.writelines(new_lines)
+
+    logging.error(f"🔧 YAML partition updated in-place (model_split only): {tspipe_config_path}")
+    logging.error(f"   New snet_partition (online): [{snet_inline}]")
+    logging.error(f"   New tnet_partition (target): [{tnet_inline}]")
+
     if os.path.exists(tspipe_config_path):
         logging.error(f"✅ YAML file verified to exist: {tspipe_config_path}")
     else:
-        logging.error(f"❌ ERROR: YAML file was not created!")
+        logging.error(f"❌ ERROR: YAML file was not created after in-place update!")
         return
 
 
@@ -1055,6 +1089,34 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
         # Record batch wall-clock for SlowdownDetector fallback
         batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
 
+        # 🔬 TEST-ONLY: "real" slowdown injection (wall-clock 기반)
+        # - FAILOVER_INJECT_SCENARIO=KEEP_REPLAN_DEGRADE 인 경우,
+        #   전역 step niter 기준 30 <= niter < 80 구간에서
+        #   baseline 대비 약 1.05x 정도(≈5% 느리게) 느려지도록 time.sleep을 추가로 부여합니다.
+        inject_scenario = getattr(args, "failover_inject_scenario", "") or os.environ.get(
+            "FAILOVER_INJECT_SCENARIO", ""
+        ).strip()
+        if inject_scenario == "KEEP_REPLAN_DEGRADE" and 30 <= niter < 80:
+            target_factor = 1.05  # ≈ 1.05x (5% 수준의 완만한 slowdown)
+            # baseline이 이미 있으면 그 기준, 아니면 현재 배치 시간을 기준으로 사용
+            baseline_ms = None
+            if slowdown_detector is not None and slowdown_detector.baseline_stage_time is not None:
+                baseline_ms = slowdown_detector.baseline_stage_time
+            else:
+                baseline_ms = batch_elapsed_time_ms
+
+            extra_ms = max(baseline_ms * (target_factor - 1.0), 0.0)
+            extra_sec = extra_ms / 1000.0
+            if extra_sec > 0:
+                time.sleep(extra_sec)
+                # sleep까지 포함한 실제 wall-clock을 다시 측정해 기록
+                batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
+                logging.info(
+                    f"🧪 REAL slowdown injected (scenario={inject_scenario}, "
+                    f"range=30-80, target≈{target_factor:.2f}x, step={niter}, "
+                    f"elapsed={batch_elapsed_time_ms:.2f}ms)"
+                )
+
         if failover_optimizer is not None:
             # Keep progress tracker up to date every step for K_rem and phase transitions.
             failover_optimizer.update_training_progress(niter, epoch)
@@ -1096,38 +1158,6 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
             else:
                 slowdown_ratio = 1.0
                 slow_gpu_id = 0
-
-            # 🔬 TEST-ONLY: Synthetic slowdown injection for E2E failover demos.
-            # FAILOVER_INJECT_SCENARIO=KEEP_REPLAN_DEGRADE 으로 설정하면,
-            # 전역 step niter 범위별로 slowdown_ratio를 최소값으로 강제로 올립니다.
-            #   - 30 <= niter < 40: >= 1.03  (KEEP 구간, 임계값 아래라 정책 미발동 기대)
-            #   - 40 <= niter < 60: >= 1.30  (REPLAN 유도 구간)
-            #   - 60 <= niter < 80: >= 3.00  (DEGRADE 유도 구간)
-            inject_scenario = getattr(args, "failover_inject_scenario", "") or os.environ.get(
-                "FAILOVER_INJECT_SCENARIO", ""
-            ).strip()
-            if inject_scenario == "KEEP_REPLAN_DEGRADE":
-                injected_min = None
-                phase_label = None
-                if 30 <= niter < 40:
-                    injected_min = 1.03
-                    phase_label = "KEEP"
-                elif 40 <= niter < 60:
-                    injected_min = 1.30
-                    phase_label = "REPLAN"
-                elif 60 <= niter < 80:
-                    injected_min = 3.00
-                    phase_label = "DEGRADE"
-
-                if injected_min is not None:
-                    # 실제 측정된 slowdown보다 작으면 올려주고, 더 크면 그대로 둡니다.
-                    slowdown_ratio = max(slowdown_ratio, injected_min)
-                    slow_gpu_id = 0
-                    logging.info(
-                        f"🧪 Injected synthetic slowdown scenario {inject_scenario} "
-                        f"(phase={phase_label}) at step {niter}: "
-                        f"gpu={slow_gpu_id}, slowdown={slowdown_ratio:.2f}x"
-                    )
 
             _SLOWDOWN_TRIGGER = 1.10  # 스펙 4절 1단계 임계값
             if slowdown_ratio > _SLOWDOWN_TRIGGER:
