@@ -2209,3 +2209,234 @@ Epoch: 1  lr: 0.100
 📊 Restart costs updated with measured values
 🔄 Restart costs updated with measured values
 📊 Restart costs updated with measured values
+args = Namespace(save_root='./results/e2e_failover_po', img_root='/nas-ssd/datasets/imagenet2012/imagenet', s_init='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-resnet152/initial_r152.pth.tar', t_model='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-vit-large/model_best.pth.tar', print_freq=50, epochs=2, batch_size=64, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=100, cuda=1, workers=4, max_steps_per_epoch=0, tspipe=True, seed=2, note='e2e_failover_po', data_name='imagenet100', t_name='vit_large', s_name='resnet152', kd_mode='st', lambda_kd=0.1, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=False, failover_inject_scenario='REPLAN', inject_slowdown_gpu=None, slowdown_factor=None, slowdown_duration=None, slowdown_start=None, slowdown_end=None)
+unparsed_args = ['--tspipe-config=benchmarks/soft_target/tspipe.yaml', '--ip=127.0.0.1', '--rank=0', '--num-nodes=1', '--tspipe-config=benchmarks/soft_target/tspipe.yaml']
+✅ [Port Setup] Using launcher-provided NCCL port: 31200 (spacing=100, expected sequence: 31200, 31300, 31400...)
+----------- Network Initialization --------------
+Student param size = 58.348708MB, 58348708 params
+Teacher param size = 303.404132MB, 303404132 params
+-----------------------------------------------
+🔄 Failover restart detected. Applying new partition to YAML...
+🔍 Extracted --tspipe-config (equals-style): benchmarks/soft_target/tspipe.yaml
+🔧 YAML partition updated in-place (model_split only): benchmarks/soft_target/tspipe.yaml
+   New snet_partition (online): [13, 12, 18, 14]
+   New tnet_partition (target): [10, 7, 6, 7]
+✅ YAML file verified to exist: benchmarks/soft_target/tspipe.yaml
+✅ YAML partition application completed
+teacher loaded with strict=False (missing=296, unexpected=296)
+✅ Restored alpha_comp from checkpoint: {0: 0.5000006129982165, 1: 0.5127057275438259, 2: 0.5000006129982165, 3: 0.6926079792878304}
+✅ Restored beta_comm from checkpoint: {0: 1.9282019211582169, 1: 1.608421939424663, 2: 1.610129890855477, 3: 2.833421998019229}
+↪️  Partition already applied in first load; skipping YAML update on second call
+✅ SlowdownDetector initialized
+📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0
+📈 ProgressTracker initialized: 2 epochs x 1979 steps = 3958 total steps
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+🧪 Slowdown duration threshold overridden: 1.0s
+🧠 DynamicPolicySelector initialized with mathematical model
+🧠 Using mathematical ETA model for decisions
+📌 Initialized current_partition from YAML: snet=[13, 12, 18, 14], tnet=[10, 7, 6, 7]
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+📈 Optimizer initialized: 57 SNet + 30 TNet layers
+⚙️ Failover restart automation configured (enabled=True, restart_config=./results/e2e_failover_po/failover_restart_config.json)
+✅ Failover monitoring components initialized
+Failover recovery successful. Resuming training from step [110] with new partition.
+Epoch: 1  lr: 0.100
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+📌 Phase-0 baseline frozen at step=110 (warmup=50)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 3 with slowdown 1.000x
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+📊 Baseline set: 1702.22ms (±846.64ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 1 with slowdown 2.785x
+⚠️ Slowdown detected: 2.79x (GPU 1) at step 120
+🎯 Mathematical Model Decision: KEEP (confidence: 90.0%)
+   Reasoning: Slowdown not sustained long enough (0.0s < 1.0s)
+🎯 Failover Policy Decision: KEEP (step=120, slowdown=2.79x, gpu=1)
+✅ Executing KEEP for GPU 1 (slowdown: 2.79) - No action needed
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 1 with slowdown 2.977x
+⚠️ Slowdown detected: 2.98x (GPU 1) at step 130
+⏱️  Stage Time Prediction: KEEP=1.276s, REPLAN=1.121s, DEGRADE=0.490s
+🧮 ETA Analysis: K_rem=3828, Optimal=degrade
+   KEEP: 4884.35s, REPLAN: 4304.85s, DEGRADE: 1888.57s
+⏱ ETA computation overhead: 1.379 ms
+🎯 Policy Decision: DEGRADE (confidence: 95.0%)
+   GPU1 slowdown: 2.98x, K_rem: 3828, Reasoning: ETA: KEEP=4884.4s, REPLAN=4304.8s, DEGRADE=1888.6s; DEGRADE saves 2995.8s, avoiding full restart cost; Severe slowdown detected
+🎯 Mathematical Model Decision: DEGRADE (confidence: 95.0%)
+   Reasoning: ETA: KEEP=4884.4s, REPLAN=4304.8s, DEGRADE=1888.6s; DEGRADE saves 2995.8s, avoiding full restart cost; Severe slowdown detected
+🔧 DEGRADE: Filtered alpha/beta to [0, 1, 2, 3]
+🎯 Failover Policy Decision: DEGRADE (step=130, slowdown=2.98x, gpu=1)
+⬇️ Executing DEGRADE by excluding GPU 1 (slowdown: 2.98)
+🧮 DEGRADE realtime DP repartition complete (bottleneck=1.4413s, alpha={0: 2.973088817636689, 1: 2.9697149495314665, 2: 2.9570198666795546, 3: 2.942507828531868}, beta={0: 2.9769415699078636, 1: 2.9769415699078636, 2: 2.975968172214734, 3: 2.9700278207135655})
+⬇️ DEGRADE applied new partition: PartitionConfig(snet_partition=[14, 18, 25], tnet_partition=[11, 8, 11], gpu_assignment=[0, 2, 3])
+💾 Failover checkpoint saved: ./results/e2e_failover_po/failover_checkpoint_latest.pth
+Failover triggered (Policy: DEGRADE). Partition saved to failover_restart_config.json. Restarting process...
+🔄 Failover detected (exit code 42), restarting main()...
+🧹 Cleaning up distributed state...

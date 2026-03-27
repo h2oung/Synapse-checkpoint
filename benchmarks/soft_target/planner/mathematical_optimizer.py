@@ -395,6 +395,18 @@ class MathematicalFailoverOptimizer:
 
         current = self.policy_selector.eta_calculator.restart_costs
         t_base = self._estimate_baseline_step_time()
+
+        # Guardrail: keep T_base in a realistic step-time range (seconds).
+        # Runtime profiler summaries can occasionally produce outlier scales,
+        # which would explode restart ETA (R * T_base) and force KEEP always.
+        force_t_base = os.environ.get("FAILOVER_FORCE_T_BASE_SEC", "").strip()
+        if force_t_base:
+            try:
+                t_base = float(force_t_base)
+            except ValueError:
+                self.logger.warning(f"Invalid FAILOVER_FORCE_T_BASE_SEC={force_t_base}, ignoring")
+        t_base = max(0.05, min(5.0, float(t_base)))
+
         updated = RestartCosts(
             C_load=4.37,
             D_replan=0.0,

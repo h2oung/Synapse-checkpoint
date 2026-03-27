@@ -90,7 +90,11 @@ parser.add_argument('--dryrun-failover-cycle', action='store_true', default=Fals
                     help='Run deterministic failover restart/resume dry-run without real training data')
 parser.add_argument('--failover-inject-scenario', type=str, default='',
                     help='Inject synthetic slowdown scenario (e.g., KEEP_REPLAN_DEGRADE) for testing failover policies')
-
+parser.add_argument('--inject-slowdown-gpu', type=int, default=None, help='GPU index to inject slowdown (relative to CUDA_VISIBLE_DEVICES)')
+parser.add_argument('--slowdown-factor', type=float, default=None, help='Slowdown factor (e.g., 1.5 for 1.5x slower)')
+parser.add_argument('--slowdown-duration', type=int, default=None, help='Number of steps to inject slowdown (default: scenario-specific)')
+parser.add_argument('--slowdown-start', type=int, default=None, help='Start step for slowdown injection (default: scenario-specific)')
+parser.add_argument('--slowdown-end', type=int, default=None, help='End step for slowdown injection (default: scenario-specific)')
 
 args, unparsed = parser.parse_known_args()
 
@@ -966,8 +970,8 @@ class RuntimeTimingIngestor:
             compute_ms = (sum(c_hist) / len(c_hist)) if c_hist else 0.0
             comm_ms = (sum(m_hist) / len(m_hist)) if m_hist else 0.0
             payload[gpu_id] = {
-                "compute_time": compute_ms,
-                "comm_time": comm_ms,
+                "compute_time": compute_ms/1000.0,
+                "comm_time": comm_ms/1000.0,
             }
         return payload
 
@@ -1089,23 +1093,52 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
         # Record batch wall-clock for SlowdownDetector fallback
         batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
 
-        # 🔬 TEST-ONLY: "real" slowdown injection (wall-clock 기반)
-        # - FAILOVER_INJECT_SCENARIO=KEEP_REPLAN_DEGRADE 인 경우,
-        #   전역 step niter 기준 30 <= niter < 80 구간에서
-        #   baseline 대비 약 1.05x 정도(≈5% 느리게) 느려지도록 time.sleep을 추가로 부여합니다.
+        # Generalized slowdown injection for failover experiments
+        slowdown_gpu = args.inject_slowdown_gpu
+        slowdown_factor = args.slowdown_factor
+        slowdown_duration = args.slowdown_duration
+        slowdown_start = args.slowdown_start
+        slowdown_end = args.slowdown_end
+
+        # Scenario-specific defaults
         inject_scenario = getattr(args, "failover_inject_scenario", "") or os.environ.get(
             "FAILOVER_INJECT_SCENARIO", ""
         ).strip()
-        if inject_scenario == "KEEP_REPLAN_DEGRADE" and 30 <= niter < 80:
-            target_factor = 1.05  # ≈ 1.05x (5% 수준의 완만한 slowdown)
-            # baseline이 이미 있으면 그 기준, 아니면 현재 배치 시간을 기준으로 사용
+        if inject_scenario == "KEEP_REPLAN_DEGRADE":
+            if slowdown_factor is None:
+                slowdown_factor = 1.05
+            if slowdown_start is None:
+                slowdown_start = 30
+            if slowdown_end is None:
+                slowdown_end = 80
+        elif inject_scenario == "REPLAN_SLOWDOWN":
+            if slowdown_factor is None:
+                slowdown_factor = 1.6
+            if slowdown_start is None:
+                slowdown_start = 60
+            total_steps = len(train_loader) * args.epochs
+            if slowdown_duration is not None:
+                slowdown_end = min(total_steps, slowdown_start + slowdown_duration)
+            elif slowdown_end is None:
+                slowdown_end = total_steps
+
+        # Only inject slowdown if scenario and GPU match
+        # (If slowdown_gpu is None, always inject; else only for matching rank)
+        should_inject = False
+        current_rank = getattr(tspipe_trainer, "rank", 0)
+        if slowdown_gpu is None or current_rank == slowdown_gpu:
+            if slowdown_factor is not None and slowdown_start is not None and slowdown_end is not None:
+                if slowdown_start <= niter < slowdown_end:
+                    should_inject = True
+
+        if should_inject:
             baseline_ms = None
             if slowdown_detector is not None and slowdown_detector.baseline_stage_time is not None:
                 baseline_ms = slowdown_detector.baseline_stage_time
             else:
                 baseline_ms = batch_elapsed_time_ms
 
-            extra_ms = max(baseline_ms * (target_factor - 1.0), 0.0)
+            extra_ms = max(baseline_ms * (slowdown_factor - 1.0), 0.0)
             extra_sec = extra_ms / 1000.0
             if extra_sec > 0:
                 time.sleep(extra_sec)
@@ -1113,7 +1146,8 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                 batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
                 logging.info(
                     f"🧪 REAL slowdown injected (scenario={inject_scenario}, "
-                    f"range=30-80, target≈{target_factor:.2f}x, step={niter}, "
+                    f"rank={current_rank}, gpu={slowdown_gpu}, "
+                    f"range={slowdown_start}-{slowdown_end}, target≈{slowdown_factor:.2f}x, step={niter}, "
                     f"elapsed={batch_elapsed_time_ms:.2f}ms)"
                 )
 
