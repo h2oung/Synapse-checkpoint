@@ -1,0 +1,1118 @@
+args = Namespace(save_root='./results/e2e_failover_0330_2', img_root='/nas-ssd/datasets/imagenet2012/imagenet', s_init='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-resnet152/initial_r152.pth.tar', t_model='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-vit-large/model_best.pth.tar', print_freq=50, epochs=50, batch_size=32, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=100, cuda=1, workers=4, max_steps_per_epoch=0, tspipe=True, seed=2, note='e2e_failover_0330_2', data_name='imagenet100', t_name='vit_large', s_name='resnet152', kd_mode='st', lambda_kd=0.1, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=False, failover_inject_scenario='', inject_slowdown_gpu=0, slowdown_factor=30.0, slowdown_duration=None, slowdown_start=60, slowdown_end=10000)
+unparsed_args = ['--tspipe-config=benchmarks/soft_target/tspipe.yaml', '--ip=127.0.0.1', '--rank=0', '--num-nodes=1', '--tspipe-config=benchmarks/soft_target/tspipe.yaml']
+✅ [Port Setup] Using launcher-provided NCCL port: 31200 (spacing=100, expected sequence: 31200, 31300, 31400...)
+----------- Network Initialization --------------
+Student param size = 58.348708MB, 58348708 params
+Teacher param size = 303.404132MB, 303404132 params
+-----------------------------------------------
+Unhandled exception in main
+Traceback (most recent call last):
+  File "/acpl-ssd10/Synapse-0320/benchmarks/soft_target/train_kd.py", line 1360, in <module>
+    main()
+  File "/acpl-ssd10/Synapse-0320/benchmarks/soft_target/train_kd.py", line 726, in main
+    tspipe_trainer = TSPipe(
+  File "/acpl-ssd10/Synapse-0320/benchmarks/soft_target/tspipe/tspipe.py", line 153, in __init__
+    self.config = yaml.load(f, Loader=yaml.FullLoader)['tspipe']
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/__init__.py", line 81, in load
+    return loader.get_single_data()
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/constructor.py", line 49, in get_single_data
+    node = self.get_single_node()
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 36, in get_single_node
+    document = self.compose_document()
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 55, in compose_document
+    node = self.compose_node(None, None)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 84, in compose_node
+    node = self.compose_mapping_node(anchor)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 133, in compose_mapping_node
+    item_value = self.compose_node(node, item_key)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 84, in compose_node
+    node = self.compose_mapping_node(anchor)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 133, in compose_mapping_node
+    item_value = self.compose_node(node, item_key)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 84, in compose_node
+    node = self.compose_mapping_node(anchor)
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/composer.py", line 127, in compose_mapping_node
+    while not self.check_event(MappingEndEvent):
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/parser.py", line 98, in check_event
+    self.current_event = self.state()
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/parser.py", line 428, in parse_block_mapping_key
+    if self.check_token(KeyToken):
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/scanner.py", line 116, in check_token
+    self.fetch_more_tokens()
+  File "/home/wisekhy/miniconda3/envs/tspipe/lib/python3.9/site-packages/yaml/scanner.py", line 258, in fetch_more_tokens
+    raise ScannerError("while scanning for the next token", None,
+yaml.scanner.ScannerError: while scanning for the next token
+found character '\t' that cannot start any token
+  in "benchmarks/soft_target/tspipe.yaml", line 6, column 1
+args = Namespace(save_root='./results/e2e_failover_0330_2', img_root='/nas-ssd/datasets/imagenet2012/imagenet', s_init='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-resnet152/initial_r152.pth.tar', t_model='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-vit-large/model_best.pth.tar', print_freq=50, epochs=50, batch_size=32, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=100, cuda=1, workers=4, max_steps_per_epoch=0, tspipe=True, seed=2, note='e2e_failover_0330_2', data_name='imagenet100', t_name='vit_large', s_name='resnet152', kd_mode='st', lambda_kd=0.1, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=False, failover_inject_scenario='', inject_slowdown_gpu=0, slowdown_factor=30.0, slowdown_duration=None, slowdown_start=60, slowdown_end=10000)
+unparsed_args = ['--tspipe-config=benchmarks/soft_target/tspipe.yaml', '--ip=127.0.0.1', '--rank=0', '--num-nodes=1', '--tspipe-config=benchmarks/soft_target/tspipe.yaml']
+✅ [Port Setup] Using launcher-provided NCCL port: 31200 (spacing=100, expected sequence: 31200, 31300, 31400...)
+----------- Network Initialization --------------
+Student param size = 58.348708MB, 58348708 params
+Teacher param size = 303.404132MB, 303404132 params
+-----------------------------------------------
+✅ SlowdownDetector initialized
+📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0
+📈 ProgressTracker initialized: 50 epochs x 3959 steps = 197950 total steps
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+🧪 Slowdown duration threshold overridden: 5.0s
+🧠 DynamicPolicySelector initialized with mathematical model
+🧠 Using mathematical ETA model for decisions
+📌 Initialized current_partition from YAML: snet=[7, 8, 16, 26], tnet=[8, 4, 4, 14]
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+📈 Optimizer initialized: 57 SNet + 30 TNet layers
+⚙️ Failover restart automation configured (enabled=True, restart_config=./results/e2e_failover_0330_2/failover_restart_config.json)
+✅ Failover monitoring components initialized
+Epoch: 1  lr: 0.100
+📊 Progress: 0.0% (0/197950), K_rem=197950, Elapsed=0.1min
+📊 Baseline set: 869.06ms (±654.01ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+📌 Phase-0 baseline frozen at step=50 (warmup=50)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=60, elapsed=25814.43ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=61, elapsed=25227.37ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=62, elapsed=25227.85ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=63, elapsed=25227.85ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=64, elapsed=25227.44ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=65, elapsed=25230.27ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=66, elapsed=25228.03ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈30.00x, step=67, elapsed=25228.02ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+args = Namespace(save_root='./results/e2e_failover_0330_2', img_root='/nas-ssd/datasets/imagenet2012/imagenet', s_init='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-resnet152/initial_r152.pth.tar', t_model='/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-vit-large/model_best.pth.tar', print_freq=50, epochs=50, batch_size=32, lr=0.1, momentum=0.9, weight_decay=0.0001, num_class=100, cuda=1, workers=4, max_steps_per_epoch=0, tspipe=True, seed=2, note='e2e_failover_0330_2', data_name='imagenet100', t_name='vit_large', s_name='resnet152', kd_mode='st', lambda_kd=0.1, T=4.0, p=2.0, w_dist=25.0, w_angle=50.0, m=2.0, gamma=0.4, P_order=2, w_irg_vert=0.1, w_irg_edge=5.0, w_irg_tran=5.0, sf=1.0, init_var=5.0, att_f=1.0, dryrun_failover_cycle=False, failover_inject_scenario='', inject_slowdown_gpu=0, slowdown_factor=15.0, slowdown_duration=None, slowdown_start=60, slowdown_end=10000)
+unparsed_args = ['--tspipe-config=benchmarks/soft_target/tspipe.yaml', '--ip=127.0.0.1', '--rank=0', '--num-nodes=1', '--tspipe-config=benchmarks/soft_target/tspipe.yaml']
+✅ [Port Setup] Using launcher-provided NCCL port: 31200 (spacing=100, expected sequence: 31200, 31300, 31400...)
+----------- Network Initialization --------------
+Student param size = 58.348708MB, 58348708 params
+Teacher param size = 303.404132MB, 303404132 params
+-----------------------------------------------
+✅ SlowdownDetector initialized
+📊 Initialized ratio-only GPU coefficients: alpha_g=1.0, beta_g=1.0
+📈 ProgressTracker initialized: 50 epochs x 3959 steps = 197950 total steps
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+✅ Alpha-Beta initialized with ratio-only defaults (alpha=1.0, beta=1.0)
+🧪 Slowdown duration threshold overridden: 5.0s
+🧠 DynamicPolicySelector initialized with mathematical model
+🧠 Using mathematical ETA model for decisions
+📌 Initialized current_partition from YAML: snet=[7, 8, 16, 26], tnet=[8, 4, 4, 14]
+📊 StageTimePredictor initialized: SNet=57 layers, TNet=30 layers
+📈 Optimizer initialized: 57 SNet + 30 TNet layers
+⚙️ Failover restart automation configured (enabled=True, restart_config=./results/e2e_failover_0330_2/failover_restart_config.json)
+✅ Failover monitoring components initialized
+Epoch: 1  lr: 0.100
+📊 Progress: 0.0% (0/197950), K_rem=197950, Elapsed=0.1min
+📊 Baseline set: 1069.04ms (±733.72ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+📌 Phase-0 baseline frozen at step=50 (warmup=50)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=60, elapsed=15679.59ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=61, elapsed=14982.59ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=62, elapsed=14983.88ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=63, elapsed=14981.36ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=64, elapsed=14982.25ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=65, elapsed=14986.38ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=66, elapsed=14980.98ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=67, elapsed=14981.74ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=68, elapsed=14981.66ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=69, elapsed=14982.22ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=70, elapsed=14980.92ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=71, elapsed=14981.51ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=72, elapsed=14981.51ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=73, elapsed=14984.22ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=74, elapsed=14982.18ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=75, elapsed=14983.39ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=76, elapsed=14980.95ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=77, elapsed=14981.55ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=78, elapsed=14981.86ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=79, elapsed=14980.92ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=80, elapsed=14981.48ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=81, elapsed=14980.96ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=82, elapsed=14981.12ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=83, elapsed=14980.92ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=84, elapsed=14981.60ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=85, elapsed=14982.82ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=86, elapsed=14981.46ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=87, elapsed=14981.82ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=88, elapsed=14983.14ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=89, elapsed=14987.70ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=90, elapsed=14981.43ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=91, elapsed=14985.14ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=92, elapsed=14981.97ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=93, elapsed=14983.79ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=94, elapsed=14979.88ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=95, elapsed=14988.79ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=96, elapsed=14981.07ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=97, elapsed=14980.99ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=98, elapsed=14982.39ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=99, elapsed=14980.84ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=100, elapsed=14981.34ms)
+📊 Progress: 0.1% (100/197950), K_rem=197850, Elapsed=11.0min
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 2.534x
+⚠️ Slowdown detected: 2.53x (GPU 0) at step 100
+🎯 Mathematical Model Decision: KEEP (confidence: 90.0%)
+   Reasoning: Slowdown not sustained long enough (0.0s < 5.0s)
+🎯 Failover Policy Decision: KEEP (step=100, slowdown=2.53x, gpu=0)
+✅ Executing KEEP for GPU 0 (slowdown: 2.53) - No action needed
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=101, elapsed=14982.29ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=102, elapsed=14981.69ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=103, elapsed=14981.00ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=104, elapsed=14981.49ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=105, elapsed=14981.61ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=106, elapsed=14981.60ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=107, elapsed=14982.70ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=108, elapsed=14981.75ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=109, elapsed=14981.31ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=110, elapsed=14981.53ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 3 with slowdown 1.464x
+⚠️ Slowdown detected: 1.46x (GPU 3) at step 110
+🎯 Mathematical Model Decision: KEEP (confidence: 90.0%)
+   Reasoning: Slowdown not sustained long enough (0.0s < 5.0s)
+🎯 Failover Policy Decision: KEEP (step=110, slowdown=1.46x, gpu=3)
+✅ Executing KEEP for GPU 3 (slowdown: 1.46) - No action needed
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=111, elapsed=14981.83ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=112, elapsed=14981.56ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=113, elapsed=14981.65ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=114, elapsed=14981.68ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=115, elapsed=14981.63ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=116, elapsed=14981.19ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=117, elapsed=14981.12ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=118, elapsed=14981.09ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=119, elapsed=14981.15ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=120, elapsed=14980.88ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=121, elapsed=14981.52ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=122, elapsed=14981.65ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=123, elapsed=14981.50ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=124, elapsed=14981.15ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=125, elapsed=14981.78ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=126, elapsed=14981.77ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=127, elapsed=14983.94ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=128, elapsed=14981.71ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=129, elapsed=14981.48ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=130, elapsed=14981.24ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=131, elapsed=14981.80ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=132, elapsed=14980.91ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=133, elapsed=14982.63ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=134, elapsed=14981.88ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=135, elapsed=14981.00ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=136, elapsed=14981.49ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=137, elapsed=14972.31ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=138, elapsed=14981.00ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=139, elapsed=14981.06ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=140, elapsed=14981.39ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔍 Identified slow GPU: GPU 0 with slowdown 1.000x
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=141, elapsed=14981.32ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=142, elapsed=14981.29ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=143, elapsed=14981.47ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🧪 REAL slowdown injected (scenario=, rank=0, gpu=0, range=60-10000, target≈15.00x, step=144, elapsed=14982.69ms)
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values
+🔄 Restart costs updated with measured values
+📊 Restart costs updated with measured values

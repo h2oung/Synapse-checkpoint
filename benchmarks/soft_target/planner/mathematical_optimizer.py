@@ -591,14 +591,14 @@ class MathematicalFailoverOptimizer:
         if current_slowdown >= 1.25:
             self.replan_time[gpu_id] += 1
             self.sustained_time[gpu_id] += 1
-            if self.replan_time[gpu_id] >= 60:
+            if self.replan_time[gpu_id] >= 30:
                 self.logger.info(f"📊 Legacy Model: DEGRADE triggered for GPU {gpu_id}")
                 self.degrade_time[gpu_id] = 0
                 return "DEGRADE"
 
         if current_slowdown >= 1.1:
             self.sustained_time[gpu_id] += 1
-            if self.sustained_time[gpu_id] >= 30:
+            if self.sustained_time[gpu_id] >= 10:
                 self.logger.info(f"📊 Legacy Model: REPLAN triggered for GPU {gpu_id}")
                 self.replan_time[gpu_id] = 0
                 self.degrade_time[gpu_id] = 0

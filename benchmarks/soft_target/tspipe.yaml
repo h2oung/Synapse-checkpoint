@@ -1,13 +1,13 @@
 tspipe:
   train:
-    deferred_batch_norm: False
+    deferred_batch_norm: false
     save_model_every_iter: 100
-
+    
   model_split: 
+    # 4GPU 설정 활성화 (실제 실험에서 검증된 설정)
+    target: [8, 4, 4, 14]   
+    online: [7, 8, 16, 26]  
 
-    #keep 실험
-    target: [9, 5, 7, 9]
-    online: [10, 11, 16, 20]
     # 4GPU 설정 활성화 (실제 실험에서 검증된 설정)
     #target: [8, 4, 4, 14]   
     #online: [7, 8, 16, 26]  

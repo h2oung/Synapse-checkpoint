@@ -662,6 +662,10 @@ def main():
             batch_size=args.batch_size, shuffle=False, num_workers=args.workers, pin_memory=True)
 
     # Bootstrap failover recovery state before pipeline initialization.
+    # NOTE: This first call is the only place where we restore alpha_comp/beta_comm
+    # from the failover checkpoint. We must preserve these values across the
+    # second bootstrap call below (which skips checkpoint restore) so that
+    # MathematicalFailoverOptimizer can reuse the learned GPU coefficients.
     bootstrap = _load_failover_bootstrap(
         save_root=args.save_root,
         unparsed_args=unparsed,
@@ -670,6 +674,12 @@ def main():
         optimizer=optimizer,
         steps_per_epoch=len(train_loader),
     )
+    # Preserve restored alpha/beta from the first bootstrap call. The second
+    # call with skip_checkpoint_restore=True will intentionally return None
+    # for these fields, so we cache them here for later use when wiring up
+    # failover_optimizer.
+    bootstrap_alpha_comp = bootstrap["alpha_comp"]
+    bootstrap_beta_comm = bootstrap["beta_comm"]
     niter = int(bootstrap["resume_step"])
     start_epoch = int(bootstrap["resume_epoch"])
     _resume_target_epoch = start_epoch
@@ -693,7 +703,11 @@ def main():
                                     nesterov = True)
 
         # Re-load bootstrap state on the final (sequential) model/optimizer objects.
-        # ⚠️ Skip YAML update AND checkpoint restore: already applied in first call above
+        # ⚠️ Skip YAML update AND checkpoint restore: already applied in first call above.
+        # This second call is used to validate partition compatibility against the
+        # sequentialized models and to rebuild PartitionConfig, but it does NOT
+        # carry alpha/beta (those were restored only in the first call above and
+        # cached in bootstrap_alpha_comp/bootstrap_beta_comm).
         bootstrap = _load_failover_bootstrap(
             save_root=args.save_root,
             unparsed_args=unparsed,
@@ -742,17 +756,21 @@ def main():
             initial_partition_config=yaml_partition_config  # ← NEW: Pass YAML partition from tspipe
         )
         
-        # If restarting from failover, override with bootstrap partition
+        # If restarting from failover, override with bootstrap partition and
+        # reapply previously restored alpha/beta coefficients.
         if failover_optimizer is not None and bootstrap["partition"] is not None:
             failover_optimizer.current_partition = bootstrap["partition"]
-            
-            # ✅ NEW: Restore alpha/beta coefficients from checkpoint or emergency config
-            if bootstrap["alpha_comp"] is not None:
-                failover_optimizer.alpha_g = bootstrap["alpha_comp"]
+
+            # ✅ Restore alpha/beta coefficients captured from the first
+            # bootstrap call (which read them from the checkpoint or
+            # emergency_restart_config). The second bootstrap call deliberately
+            # returns None for these fields when skip_checkpoint_restore=True.
+            if bootstrap_alpha_comp is not None:
+                failover_optimizer.alpha_g = bootstrap_alpha_comp
                 logging.error(f"🔄 Restored alpha_g from checkpoint: {failover_optimizer.alpha_g}")
-            
-            if bootstrap["beta_comm"] is not None:
-                failover_optimizer.beta_g = bootstrap["beta_comm"]
+
+            if bootstrap_beta_comm is not None:
+                failover_optimizer.beta_g = bootstrap_beta_comm
                 logging.error(f"🔄 Restored beta_g from checkpoint: {failover_optimizer.beta_g}")
 
         def _save_failover_checkpoint(meta):
@@ -997,8 +1015,12 @@ def train(train_loader, nets, optimizer, criterions, epoch, writer):
             criterionKD[i].train()
 
     end = time.time()
-    pbar = tqdm(train_loader)
-    for i, (img, target) in enumerate(pbar, start=1):
+    global niter
+    # tqdm 진행바와 enumerate 시작 인덱스를 niter(복원 step)에 맞게 조정
+    pbar = tqdm(train_loader, initial=niter)
+    for i, (img, target) in enumerate(pbar, start=niter+1):
+        if i <= niter:
+            continue
         if _should_skip_resume_batch(epoch):
             continue
 
@@ -1077,8 +1099,12 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
     """
     global niter
 
-    pbar = tqdm(train_loader)
-    for i, (img, target) in enumerate(pbar, start=1):
+    global niter
+    # tqdm 진행바와 enumerate 시작 인덱스를 niter(복원 step)에 맞게 조정
+    pbar = tqdm(train_loader, initial=niter)
+    for i, (img, target) in enumerate(pbar, start=niter+1):
+        if i <= niter:
+            continue
         if _should_skip_resume_batch(epoch):
             continue
 
@@ -1329,63 +1355,102 @@ def adjust_lr(optimizer, epoch):
         param_group['lr'] = lr
 
 
-if __name__ == '__main__':
-    while True:  # ← Soft Failover restart loop
-        try:
-            main()
-            break  # 정상 종료 시
-        except SystemExit as e:
-            if e.code == 42:
-                logging.error("🔄 Failover detected (exit code 42), restarting main()...")
-                # Comprehensive cleanup before restart
-                try:
-                    import torch.distributed.rpc as rpc
-                    import torch.distributed as dist
-                    
-                    logging.info("🧹 Cleaning up distributed state...")
-                    
-                    # 1. RPC shutdown (120s timeout to allow thread pool drain)
+if __name__ == "__main__":
+    try:
+        main()
+
+    except SystemExit as e:
+        code = getattr(e, "code", 1)
+
+        if code == 42:
+            cleanup_start = time.monotonic()
+            logging.error("Failover detected (exit code 42). Exiting for launcher restart.")
+
+            try:
+                import os
+                import signal
+                import multiprocessing as mp
+
+                # 오버헤드 최소화를 위한 기본값
+                # 런처가 포트를 매번 바꾸므로 기본 wait는 0으로 둠
+                budget_sec = float(os.environ.get("FAILOVER_CLEANUP_BUDGET_SEC", "8"))
+                rpc_timeout_sec = float(os.environ.get("FAILOVER_RPC_SHUTDOWN_TIMEOUT_SEC", "2"))
+                join_timeout_sec = float(os.environ.get("FAILOVER_CHILD_JOIN_TIMEOUT_SEC", "1"))
+                wait_sec = float(os.environ.get("FAILOVER_SOCKET_CLEANUP_WAIT_SEC", "0"))
+
+                do_rpc = os.environ.get("FAILOVER_CLEANUP_DO_RPC", "0") == "1"
+                do_pg = os.environ.get("FAILOVER_CLEANUP_DO_PG", "1") == "1"
+                do_children = os.environ.get("FAILOVER_CLEANUP_DO_CHILDREN", "1") == "1"
+
+                def _remaining():
+                    return budget_sec - (time.monotonic() - cleanup_start)
+
+                # 1) RPC shutdown은 기본적으로 스킵, 필요할 때만 짧게
+                if do_rpc and _remaining() > 0:
                     try:
-                        rpc.shutdown(timeout=120.0)
-                        logging.info("✅ RPC shutdown completed")
-                    except Exception as e:
-                        logging.warning(f"RPC shutdown (non-fatal): {e}")
-                    
-                    # 2. Process group cleanup
+                        import torch.distributed.rpc as rpc
+                        t = min(rpc_timeout_sec, max(0.0, _remaining()))
+                        if t > 0:
+                            rpc.shutdown(timeout=t)
+                    except Exception as ex:
+                        logging.warning(f"RPC shutdown (non-fatal): {ex}")
+
+                # 2) Process group destroy는 보통 빠르니 best effort
+                if do_pg and _remaining() > 0:
                     try:
+                        import torch.distributed as dist
                         if dist.is_available() and dist.is_initialized():
                             dist.destroy_process_group()
-                            logging.info("✅ Process group destroyed")
-                    except Exception as e:
-                        logging.warning(f"Process group destroy (non-fatal): {e}")
-                    
-                    # 3. [INFO] Port is controlled by run_e2e_failover.sh launcher for each restart
-                    # We do NOT set port here - that's the launcher's job.
-                    # Launcher uses port spacing=100 to avoid TIME_WAIT conflicts
-                    # Expected: RESTART_COUNT=0→31200, 1→31300, 2→31400, etc.
+                    except Exception as ex:
+                        logging.warning(f"Process group destroy (non-fatal): {ex}")
+
+                # 3) 남아있는 자식 프로세스 정리
+                # 종료 지연의 주범이라 여기만은 기본적으로 수행
+                if do_children and _remaining() > 0:
                     try:
-                        import os
-                        # Just verify port is still set from launcher (updated per restart iteration)
-                        nccl_port_current = os.environ.get('PYTORCH_DISTRIBUTED_NCCL_START_PORT')
-                        if nccl_port_current:
-                            logging.info(f"✅ [Cleanup] NCCL port from launcher: {nccl_port_current} (will be updated to next iteration: +100)")
-                        else:
-                            logging.warning(f"⚠️ [Cleanup] NCCL port not found in env, launcher should set it for next restart")
-                        
-                        # NOTE: Module reload is dangerous due to singleton patterns and module-level state.
-                        # Instead, let main() restart naturally pick up new environment.
-                    except Exception as e:
-                        logging.warning(f"Port check (non-fatal): {e}")
-                    
-                    # 4. Wait for OS socket cleanup (TIME_WAIT state resolution)
-                    # 30초: 충분한 대기 시간으로 모든 NCCL/RPC 소켓 정리 보장
-                    # Launcher uses port spacing=100 (31200, 31300, 31400...) for each restart
-                    time.sleep(30.0)
-                    logging.info("✅ Distributed state cleanup completed (waited 30s for socket cleanup, launcher using port spacing=100)")
-                    
-                except Exception as cleanup_error:
-                    logging.error(f"⚠️ Cleanup error (continuing anyway): {cleanup_error}")
-                
-                continue  # ← main() 재호출
-            else:
-                raise  # 다른 exit code는 그냥 종료
+                        children = mp.active_children()
+                        for p in children:
+                            try:
+                                p.terminate()
+                            except Exception:
+                                pass
+
+                        # join은 짧게만
+                        t_join = min(join_timeout_sec, max(0.0, _remaining()))
+                        if t_join > 0:
+                            for p in children:
+                                try:
+                                    p.join(timeout=t_join)
+                                except Exception:
+                                    pass
+
+                        # 살아있으면 kill
+                        for p in mp.active_children():
+                            try:
+                                if hasattr(p, "kill"):
+                                    p.kill()
+                                else:
+                                    os.kill(p.pid, signal.SIGKILL)
+                            except Exception:
+                                pass
+                    except Exception as ex:
+                        logging.warning(f"Child cleanup (non-fatal): {ex}")
+
+                # 4) 소켓 대기는 기본 0, 필요 시에만 짧게
+                if wait_sec > 0 and _remaining() > 0:
+                    time.sleep(min(wait_sec, max(0.0, _remaining())))
+
+                elapsed = time.monotonic() - cleanup_start
+                logging.info(f"Cleanup finished in {elapsed:.3f}s. Forcing exit 42 for launcher restart.")
+
+            except Exception as cleanup_error:
+                logging.error(f"Cleanup error (continuing anyway): {cleanup_error}")
+
+            # 파이썬 종료 지연 방지용 강제 종료
+            os._exit(42)
+
+        raise
+
+    except Exception:
+        logging.exception("Unhandled exception in main")
+        raise

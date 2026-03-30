@@ -1,0 +1,586 @@
+
+====== Step 1 ======
+[GPU 2] Task=copy_batch           | Batch=1 UBatch=0 | Partition=2 Target=True | StartTime=1774860983.608313 | Time=1522.08 ms | Mem=478.55 MB | MaxMem=478.55 MB | GpuUtil=0% | Power=87.28/300.00W
+[GPU 2] Task=copy_batch           | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860985.154741 | Time=0.06 ms | Mem=553.50 MB | MaxMem=553.50 MB | GpuUtil=0% | Power=87.28/300.00W
+[GPU 2] Task=compute_forward      | Batch=1 UBatch=0 | Partition=2 Target=True | StartTime=1774860983.608066 | Time=1739.88 ms | Mem=462.00 MB | MaxMem=737.25 MB | GpuUtil=0% | Power=85.59/300.00W
+[GPU 2] Task=compute_forward      | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860985.361845 | Time=194.16 ms | Mem=1663.19 MB | MaxMem=1663.19 MB | GpuUtil=0% | Power=85.51/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=1 UBatch=0 | Partition=2 Target=True | StartTime=1774860985.583517 | Time=1.15 ms | Mem=1663.19 MB | MaxMem=1663.19 MB | GpuUtil=0% | Power=85.51/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860985.590446 | Time=2.67 ms | Mem=1663.19 MB | MaxMem=1663.19 MB | GpuUtil=0% | Power=85.51/300.00W
+[GPU 2] Task=copy_grad            | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860985.162609 | Time=1406.11 ms | Mem=1638.57 MB | MaxMem=1663.19 MB | GpuUtil=0% | Power=85.38/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860983.608271 | Time=3034.03 ms | Mem=530.57 MB | MaxMem=1700.82 MB | GpuUtil=0% | Power=85.37/300.00W
+[GPU 2] Task=compute_backward     | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860985.583489 | Time=1056.24 ms | Mem=530.57 MB | MaxMem=1700.82 MB | GpuUtil=0% | Power=85.37/300.00W
+[GPU 2] Task=compute_optimize     | Batch=1 UBatch=0 | Partition=2 Target=False | StartTime=1774860986.650837 | Time=67.07 ms | Mem=574.38 MB | MaxMem=1700.82 MB | GpuUtil=0% | Power=85.38/300.00W
+
+====== Step 2 ======
+[GPU 2] Task=copy_model           | Batch=2 UBatch=0 | Partition=2 Target=True | StartTime=1774860986.722464 | Time=3.94 ms | Mem=574.38 MB | MaxMem=1700.82 MB | GpuUtil=0% | Power=85.38/300.00W
+[GPU 2] Task=copy_model           | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860986.732176 | Time=2.07 ms | Mem=574.38 MB | MaxMem=1700.82 MB | GpuUtil=0% | Power=85.38/300.00W
+[GPU 2] Task=copy_batch           | Batch=2 UBatch=0 | Partition=2 Target=True | StartTime=1774860986.573064 | Time=633.92 ms | Mem=574.50 MB | MaxMem=1700.82 MB | GpuUtil=18% | Power=105.90/300.00W
+[GPU 2] Task=copy_batch           | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.210826 | Time=39.02 ms | Mem=623.63 MB | MaxMem=1700.82 MB | GpuUtil=18% | Power=105.90/300.00W
+[GPU 2] Task=compute_forward      | Batch=2 UBatch=0 | Partition=2 Target=True | StartTime=1774860986.732064 | Time=546.11 ms | Mem=599.00 MB | MaxMem=1700.82 MB | GpuUtil=18% | Power=105.90/300.00W
+[GPU 2] Task=compute_forward      | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.281217 | Time=14.66 ms | Mem=1800.19 MB | MaxMem=1800.19 MB | GpuUtil=18% | Power=105.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=2 UBatch=0 | Partition=2 Target=True | StartTime=1774860987.300291 | Time=1.55 ms | Mem=1800.19 MB | MaxMem=1800.19 MB | GpuUtil=18% | Power=105.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.304129 | Time=2.93 ms | Mem=1800.19 MB | MaxMem=1800.19 MB | GpuUtil=18% | Power=106.89/300.00W
+[GPU 2] Task=copy_grad            | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.252362 | Time=214.77 ms | Mem=1775.57 MB | MaxMem=1800.19 MB | GpuUtil=48% | Power=107.99/300.00W
+[GPU 2] Task=compute_backward     | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.302414 | Time=190.73 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=107.99/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860986.649237 | Time=845.41 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=107.99/300.00W
+[GPU 2] Task=compute_optimize     | Batch=2 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.499675 | Time=31.88 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=109.09/300.00W
+
+====== Step 3 ======
+[GPU 2] Task=copy_model           | Batch=3 UBatch=0 | Partition=2 Target=True | StartTime=1774860987.538226 | Time=1.25 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=109.09/300.00W
+[GPU 2] Task=copy_model           | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.546270 | Time=2.28 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=109.09/300.00W
+[GPU 2] Task=copy_batch           | Batch=3 UBatch=0 | Partition=2 Target=True | StartTime=1774860987.469500 | Time=344.26 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=132.97/300.00W
+[GPU 2] Task=copy_batch           | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.821762 | Time=26.35 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=132.97/300.00W
+[GPU 2] Task=compute_forward      | Batch=3 UBatch=0 | Partition=2 Target=True | StartTime=1774860987.546298 | Time=338.39 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=132.97/300.00W
+[GPU 2] Task=compute_forward      | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.888949 | Time=14.88 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=132.97/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=3 UBatch=0 | Partition=2 Target=True | StartTime=1774860987.906104 | Time=1.01 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=134.06/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.918546 | Time=1.03 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=3% | Power=134.06/300.00W
+[GPU 2] Task=copy_grad            | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.850746 | Time=206.18 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=63% | Power=135.16/300.00W
+[GPU 2] Task=compute_backward     | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.906369 | Time=176.70 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=63% | Power=135.16/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860987.501090 | Time=581.54 ms | Mem=743.69 MB | MaxMem=1837.82 MB | GpuUtil=63% | Power=135.16/300.00W
+[GPU 2] Task=compute_optimize     | Batch=3 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.088020 | Time=31.85 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=63% | Power=132.60/300.00W
+
+====== Step 4 ======
+[GPU 2] Task=copy_model           | Batch=4 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.127100 | Time=1.31 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=132.60/300.00W
+[GPU 2] Task=copy_model           | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.133996 | Time=5.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=132.60/300.00W
+[GPU 2] Task=copy_batch           | Batch=4 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.065022 | Time=329.49 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=136.00/300.00W
+[GPU 2] Task=copy_batch           | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.404475 | Time=26.75 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=138.61/300.00W
+[GPU 2] Task=compute_forward      | Batch=4 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.133855 | Time=336.68 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=138.61/300.00W
+[GPU 2] Task=compute_forward      | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.477512 | Time=17.65 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=138.61/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=4 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.500745 | Time=0.90 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=138.61/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.506839 | Time=0.89 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=138.63/300.00W
+[GPU 2] Task=copy_grad            | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.436416 | Time=222.87 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=59% | Power=138.63/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.093324 | Time=593.05 ms | Mem=743.69 MB | MaxMem=1837.82 MB | GpuUtil=59% | Power=138.63/300.00W
+[GPU 2] Task=compute_backward     | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.499572 | Time=187.24 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=59% | Power=138.63/300.00W
+[GPU 2] Task=compute_optimize     | Batch=4 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.692291 | Time=30.71 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=59% | Power=138.63/300.00W
+
+====== Step 5 ======
+[GPU 2] Task=copy_model           | Batch=5 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.729231 | Time=0.93 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.63/300.00W
+[GPU 2] Task=copy_model           | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.732399 | Time=1.93 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.63/300.00W
+[GPU 2] Task=copy_batch           | Batch=5 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.664177 | Time=313.33 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=135.97/300.00W
+[GPU 2] Task=copy_batch           | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.987716 | Time=7.46 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=135.97/300.00W
+[GPU 2] Task=compute_forward      | Batch=5 UBatch=0 | Partition=2 Target=True | StartTime=1774860988.734855 | Time=317.98 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=138.58/300.00W
+[GPU 2] Task=compute_forward      | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.060525 | Time=14.77 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=138.58/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=5 UBatch=0 | Partition=2 Target=True | StartTime=1774860989.078077 | Time=0.92 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=138.58/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.081291 | Time=2.57 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=4% | Power=138.58/300.00W
+[GPU 2] Task=copy_grad            | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.997730 | Time=249.19 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.62/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860988.690812 | Time=583.31 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.62/300.00W
+[GPU 2] Task=compute_backward     | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.078104 | Time=194.76 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.62/300.00W
+[GPU 2] Task=compute_optimize     | Batch=5 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.281125 | Time=28.58 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.63/300.00W
+
+====== Step 6 ======
+[GPU 2] Task=copy_model           | Batch=6 UBatch=0 | Partition=2 Target=True | StartTime=1774860989.315284 | Time=1.09 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.63/300.00W
+[GPU 2] Task=copy_model           | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.318690 | Time=2.28 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=64% | Power=138.63/300.00W
+[GPU 2] Task=copy_batch           | Batch=6 UBatch=0 | Partition=2 Target=True | StartTime=1774860989.253964 | Time=331.57 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=136.63/300.00W
+[GPU 2] Task=copy_batch           | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.590492 | Time=30.70 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=137.31/300.00W
+[GPU 2] Task=compute_forward      | Batch=6 UBatch=0 | Partition=2 Target=True | StartTime=1774860989.321417 | Time=336.22 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=137.31/300.00W
+[GPU 2] Task=compute_forward      | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.668846 | Time=14.37 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=137.31/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=6 UBatch=0 | Partition=2 Target=True | StartTime=1774860989.689494 | Time=0.91 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=137.31/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.696859 | Time=0.75 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=137.31/300.00W
+[GPU 2] Task=copy_grad            | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.625171 | Time=214.97 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=58% | Power=137.33/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.280977 | Time=587.13 ms | Mem=694.69 MB | MaxMem=1837.82 MB | GpuUtil=58% | Power=137.33/300.00W
+[GPU 2] Task=compute_backward     | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.689520 | Time=179.18 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=58% | Power=137.33/300.00W
+[GPU 2] Task=compute_optimize     | Batch=6 UBatch=0 | Partition=2 Target=False | StartTime=1774860989.877482 | Time=26.67 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=58% | Power=137.33/300.00W
+
+====== Step 7 ======
+[GPU 2] Task=copy_model           | Batch=7 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.400456 | Time=1.45 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=85.33/300.00W
+[GPU 2] Task=copy_model           | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.406472 | Time=5.03 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=85.33/300.00W
+[GPU 2] Task=copy_batch           | Batch=7 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.404012 | Time=198.33 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=92.34/300.00W
+[GPU 2] Task=copy_batch           | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.612983 | Time=25.52 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.48/300.00W
+[GPU 2] Task=compute_forward      | Batch=7 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.404787 | Time=270.52 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.48/300.00W
+[GPU 2] Task=compute_forward      | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.682029 | Time=14.91 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.48/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=7 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.706874 | Time=0.95 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.48/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.710086 | Time=5.22 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.48/300.00W
+[GPU 2] Task=copy_grad            | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.642716 | Time=224.02 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=96.56/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.433934 | Time=463.85 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=96.56/300.00W
+[GPU 2] Task=compute_backward     | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.707070 | Time=186.19 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=96.56/300.00W
+[GPU 2] Task=compute_optimize     | Batch=7 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.904528 | Time=28.54 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=96.61/300.00W
+
+====== Step 8 ======
+[GPU 2] Task=copy_model           | Batch=8 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.936383 | Time=0.97 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=96.61/300.00W
+[GPU 2] Task=copy_model           | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.941695 | Time=2.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=96.61/300.00W
+[GPU 2] Task=copy_batch           | Batch=8 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.869634 | Time=319.08 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=122.19/300.00W
+[GPU 2] Task=copy_batch           | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.198103 | Time=9.78 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=122.19/300.00W
+[GPU 2] Task=compute_forward      | Batch=8 UBatch=0 | Partition=2 Target=True | StartTime=1774861001.941667 | Time=318.66 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=124.21/300.00W
+[GPU 2] Task=compute_forward      | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.265080 | Time=14.84 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=124.21/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=8 UBatch=0 | Partition=2 Target=True | StartTime=1774861002.285394 | Time=0.83 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=124.21/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.291804 | Time=1.45 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=124.21/300.00W
+[GPU 2] Task=copy_grad            | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.210688 | Time=233.76 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+[GPU 2] Task=compute_backward     | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.283704 | Time=187.65 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861001.900519 | Time=572.62 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+[GPU 2] Task=compute_optimize     | Batch=8 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.475794 | Time=4.04 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+
+====== Step 9 ======
+[GPU 2] Task=copy_model           | Batch=9 UBatch=0 | Partition=2 Target=True | StartTime=1774861002.480852 | Time=3.39 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+[GPU 2] Task=copy_model           | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.486436 | Time=17.75 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=66% | Power=120.42/300.00W
+[GPU 2] Task=copy_batch           | Batch=9 UBatch=0 | Partition=2 Target=True | StartTime=1774861002.449631 | Time=310.82 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.26/300.00W
+[GPU 2] Task=copy_batch           | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.765653 | Time=30.49 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.26/300.00W
+[GPU 2] Task=compute_forward      | Batch=9 UBatch=0 | Partition=2 Target=True | StartTime=1774861002.493342 | Time=343.05 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.47/300.00W
+[GPU 2] Task=compute_forward      | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.838629 | Time=14.81 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.47/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=9 UBatch=0 | Partition=2 Target=True | StartTime=1774861002.855646 | Time=1.00 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.47/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.858850 | Time=4.72 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=12% | Power=137.47/300.00W
+[GPU 2] Task=copy_grad            | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.800008 | Time=210.95 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+[GPU 2] Task=compute_backward     | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.856065 | Time=184.53 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861002.480490 | Time=560.77 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+[GPU 2] Task=compute_optimize     | Batch=9 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.043608 | Time=7.84 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+
+====== Step 10 ======
+[GPU 2] Task=copy_model           | Batch=10 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.051526 | Time=1.52 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+[GPU 2] Task=copy_model           | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.056702 | Time=25.63 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=55% | Power=137.49/300.00W
+[GPU 2] Task=copy_batch           | Batch=10 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.016512 | Time=328.28 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.81/300.00W
+[GPU 2] Task=copy_batch           | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.353722 | Time=42.99 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.81/300.00W
+[GPU 2] Task=compute_forward      | Batch=10 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.054228 | Time=362.00 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.81/300.00W
+[GPU 2] Task=compute_forward      | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.420070 | Time=14.71 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.31/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=10 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.438612 | Time=0.88 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.31/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.443769 | Time=1.51 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.31/300.00W
+[GPU 2] Task=copy_grad            | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.401525 | Time=200.07 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.32/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.051357 | Time=578.07 ms | Mem=743.69 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.35/300.00W
+[GPU 2] Task=compute_backward     | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.438640 | Time=191.17 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.35/300.00W
+[GPU 2] Task=compute_optimize     | Batch=10 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.639349 | Time=7.41 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.35/300.00W
+
+====== Step 11 ======
+[GPU 2] Task=copy_model           | Batch=11 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.649721 | Time=1.07 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.35/300.00W
+[GPU 2] Task=copy_model           | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.653085 | Time=2.60 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=138.35/300.00W
+[GPU 2] Task=copy_batch           | Batch=11 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.604741 | Time=303.92 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=129.36/300.00W
+[GPU 2] Task=copy_batch           | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.919521 | Time=54.04 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=32% | Power=137.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=11 UBatch=0 | Partition=2 Target=True | StartTime=1774861003.653059 | Time=327.17 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=32% | Power=137.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.983608 | Time=15.00 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=32% | Power=137.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=11 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.003684 | Time=3.14 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=32% | Power=137.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.010447 | Time=1.86 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=32% | Power=137.70/300.00W
+[GPU 2] Task=copy_grad            | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.980905 | Time=185.47 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.65/300.00W
+[GPU 2] Task=compute_backward     | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.006024 | Time=187.63 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.65/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861003.635522 | Time=558.73 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.65/300.00W
+[GPU 2] Task=compute_optimize     | Batch=11 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.203764 | Time=25.83 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.68/300.00W
+
+====== Step 12 ======
+[GPU 2] Task=copy_model           | Batch=12 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.234916 | Time=1.45 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.68/300.00W
+[GPU 2] Task=copy_model           | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.238638 | Time=2.07 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=35% | Power=137.68/300.00W
+[GPU 2] Task=copy_batch           | Batch=12 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.174680 | Time=324.88 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=130.32/300.00W
+[GPU 2] Task=copy_batch           | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.512025 | Time=24.15 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=130.32/300.00W
+[GPU 2] Task=compute_forward      | Batch=12 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.238587 | Time=335.36 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=34% | Power=137.39/300.00W
+[GPU 2] Task=compute_forward      | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.581583 | Time=14.54 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=34% | Power=137.39/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=12 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.598430 | Time=1.16 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=34% | Power=137.39/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.602406 | Time=1.05 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=34% | Power=137.39/300.00W
+[GPU 2] Task=copy_grad            | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.539068 | Time=222.87 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=34% | Power=137.35/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.208965 | Time=584.84 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.35/300.00W
+[GPU 2] Task=compute_backward     | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.598367 | Time=194.22 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.35/300.00W
+[GPU 2] Task=compute_optimize     | Batch=12 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.798107 | Time=35.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.35/300.00W
+
+====== Step 13 ======
+[GPU 2] Task=copy_model           | Batch=13 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.836091 | Time=1.02 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.35/300.00W
+[GPU 2] Task=copy_model           | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.839261 | Time=2.13 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.35/300.00W
+[GPU 2] Task=copy_batch           | Batch=13 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.767738 | Time=320.72 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=137.69/300.00W
+[GPU 2] Task=copy_batch           | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.099011 | Time=27.33 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=137.69/300.00W
+[GPU 2] Task=compute_forward      | Batch=13 UBatch=0 | Partition=2 Target=True | StartTime=1774861004.839445 | Time=324.89 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=24% | Power=137.71/300.00W
+[GPU 2] Task=compute_forward      | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.170986 | Time=14.92 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=24% | Power=137.71/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=13 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.193622 | Time=1.08 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=24% | Power=137.71/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.199801 | Time=0.86 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=24% | Power=137.71/300.00W
+[GPU 2] Task=copy_grad            | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.129316 | Time=216.39 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=24% | Power=137.73/300.00W
+[GPU 2] Task=compute_backward     | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.193654 | Time=178.25 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.73/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861004.796567 | Time=576.69 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.73/300.00W
+[GPU 2] Task=compute_optimize     | Batch=13 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.375320 | Time=37.98 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.73/300.00W
+
+====== Step 14 ======
+[GPU 2] Task=copy_model           | Batch=14 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.419570 | Time=0.95 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.73/300.00W
+[GPU 2] Task=copy_model           | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.424722 | Time=2.04 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=137.73/300.00W
+[GPU 2] Task=copy_batch           | Batch=14 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.351747 | Time=337.21 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=45% | Power=138.33/300.00W
+[GPU 2] Task=copy_batch           | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.699511 | Time=26.66 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=45% | Power=138.33/300.00W
+[GPU 2] Task=compute_forward      | Batch=14 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.421061 | Time=343.12 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=45% | Power=138.35/300.00W
+[GPU 2] Task=compute_forward      | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.769527 | Time=15.07 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=22% | Power=138.35/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=14 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.787900 | Time=0.93 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=22% | Power=138.35/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.793880 | Time=1.76 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=22% | Power=138.35/300.00W
+[GPU 2] Task=copy_grad            | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.729113 | Time=213.59 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=22% | Power=138.37/300.00W
+[GPU 2] Task=compute_backward     | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.788158 | Time=181.41 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.40/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.381827 | Time=588.74 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.40/300.00W
+[GPU 2] Task=compute_optimize     | Batch=14 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.972713 | Time=34.18 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.40/300.00W
+
+====== Step 15 ======
+[GPU 2] Task=copy_model           | Batch=15 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.012673 | Time=1.24 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.40/300.00W
+[GPU 2] Task=copy_model           | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.016217 | Time=2.07 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.40/300.00W
+[GPU 2] Task=copy_batch           | Batch=15 UBatch=0 | Partition=2 Target=True | StartTime=1774861005.950429 | Time=325.06 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=139.07/300.00W
+[GPU 2] Task=copy_batch           | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.284956 | Time=34.81 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=139.07/300.00W
+[GPU 2] Task=compute_forward      | Batch=15 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.016244 | Time=332.12 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=52% | Power=139.07/300.00W
+[GPU 2] Task=compute_forward      | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.356891 | Time=14.51 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=14% | Power=139.09/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=15 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.373637 | Time=1.17 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=14% | Power=139.09/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.380560 | Time=2.66 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=14% | Power=139.09/300.00W
+[GPU 2] Task=copy_grad            | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.326836 | Time=218.86 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=14% | Power=139.12/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861005.977525 | Time=597.06 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=139.12/300.00W
+[GPU 2] Task=compute_backward     | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.378426 | Time=193.48 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=139.12/300.00W
+[GPU 2] Task=compute_optimize     | Batch=15 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.579870 | Time=30.88 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=139.12/300.00W
+
+====== Step 16 ======
+[GPU 2] Task=copy_model           | Batch=16 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.618800 | Time=1.22 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=139.12/300.00W
+[GPU 2] Task=copy_model           | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.626164 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=139.12/300.00W
+[GPU 2] Task=copy_batch           | Batch=16 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.552134 | Time=326.94 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=139.00/300.00W
+[GPU 2] Task=copy_batch           | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.882630 | Time=31.51 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=139.00/300.00W
+[GPU 2] Task=compute_forward      | Batch=16 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.626037 | Time=324.62 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=139.01/300.00W
+[GPU 2] Task=compute_forward      | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.960175 | Time=14.74 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=139.01/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=16 UBatch=0 | Partition=2 Target=True | StartTime=1774861006.978008 | Time=0.84 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=139.01/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.981723 | Time=1.83 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=139.01/300.00W
+[GPU 2] Task=copy_grad            | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.916557 | Time=216.85 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=139.01/300.00W
+[GPU 2] Task=compute_backward     | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.979177 | Time=183.55 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.11/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861006.576951 | Time=587.18 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=20% | Power=138.11/300.00W
+[GPU 2] Task=compute_optimize     | Batch=16 UBatch=0 | Partition=2 Target=False | StartTime=1774861007.166341 | Time=35.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=138.11/300.00W
+
+====== Step 17 ======
+[GPU 2] Task=copy_model           | Batch=17 UBatch=0 | Partition=2 Target=True | StartTime=1774861013.341461 | Time=1.29 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.36/300.00W
+[GPU 2] Task=copy_model           | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.348228 | Time=4.90 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.34/300.00W
+[GPU 2] Task=copy_batch           | Batch=17 UBatch=0 | Partition=2 Target=True | StartTime=1774861013.345188 | Time=203.61 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=101.64/300.00W
+[GPU 2] Task=copy_batch           | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.563967 | Time=19.73 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=100.50/300.00W
+[GPU 2] Task=compute_forward      | Batch=17 UBatch=0 | Partition=2 Target=True | StartTime=1774861013.346821 | Time=279.29 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=100.50/300.00W
+[GPU 2] Task=compute_forward      | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.633013 | Time=14.70 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=100.50/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=17 UBatch=0 | Partition=2 Target=True | StartTime=1774861013.653570 | Time=1.30 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=100.50/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.660464 | Time=1.13 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=100.23/300.00W
+[GPU 2] Task=copy_grad            | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.587965 | Time=221.68 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=100.08/300.00W
+[GPU 2] Task=compute_backward     | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.651235 | Time=185.52 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=100.08/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.350668 | Time=484.24 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=100.08/300.00W
+[GPU 2] Task=compute_optimize     | Batch=17 UBatch=0 | Partition=2 Target=False | StartTime=1774861013.839942 | Time=35.52 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=99.94/300.00W
+
+====== Step 18 ======
+[GPU 2] Task=copy_model           | Batch=18 UBatch=0 | Partition=2 Target=True | StartTime=1774861022.544795 | Time=1.22 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.35/300.00W
+[GPU 2] Task=copy_model           | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.553093 | Time=2.49 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.35/300.00W
+[GPU 2] Task=copy_batch           | Batch=18 UBatch=0 | Partition=2 Target=True | StartTime=1774861022.546812 | Time=196.62 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.58/300.00W
+[GPU 2] Task=copy_batch           | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.752037 | Time=25.18 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.99/300.00W
+[GPU 2] Task=compute_forward      | Batch=18 UBatch=0 | Partition=2 Target=True | StartTime=1774861022.548104 | Time=268.04 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.99/300.00W
+[GPU 2] Task=compute_forward      | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.821907 | Time=14.83 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.99/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=18 UBatch=0 | Partition=2 Target=True | StartTime=1774861022.843449 | Time=1.35 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.99/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.847848 | Time=2.07 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.99/300.00W
+[GPU 2] Task=copy_grad            | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.785455 | Time=222.54 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.93/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.551814 | Time=481.69 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.93/300.00W
+[GPU 2] Task=compute_backward     | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861022.845376 | Time=188.40 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.93/300.00W
+[GPU 2] Task=compute_optimize     | Batch=18 UBatch=0 | Partition=2 Target=False | StartTime=1774861023.039370 | Time=33.77 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.32/300.00W
+
+====== Step 19 ======
+[GPU 2] Task=copy_model           | Batch=19 UBatch=0 | Partition=2 Target=True | StartTime=1774861031.751420 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.26/300.00W
+[GPU 2] Task=copy_model           | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861031.759255 | Time=0.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.26/300.00W
+[GPU 2] Task=copy_batch           | Batch=19 UBatch=0 | Partition=2 Target=True | StartTime=1774861031.751366 | Time=185.07 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.31/300.00W
+[GPU 2] Task=copy_batch           | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861031.941456 | Time=14.01 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.31/300.00W
+[GPU 2] Task=compute_forward      | Batch=19 UBatch=0 | Partition=2 Target=True | StartTime=1774861031.754372 | Time=251.91 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.81/300.00W
+[GPU 2] Task=compute_forward      | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861032.014457 | Time=14.70 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.81/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=19 UBatch=0 | Partition=2 Target=True | StartTime=1774861032.031659 | Time=1.18 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.81/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861032.035264 | Time=2.10 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=95.81/300.00W
+[GPU 2] Task=copy_grad            | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861031.957899 | Time=239.36 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.81/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861031.756759 | Time=464.80 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.81/300.00W
+[GPU 2] Task=compute_backward     | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861032.031633 | Time=191.42 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.81/300.00W
+[GPU 2] Task=compute_optimize     | Batch=19 UBatch=0 | Partition=2 Target=False | StartTime=1774861032.229696 | Time=30.07 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.81/300.00W
+
+====== Step 20 ======
+[GPU 2] Task=copy_model           | Batch=20 UBatch=0 | Partition=2 Target=True | StartTime=1774861040.959569 | Time=1.92 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.30/300.00W
+[GPU 2] Task=copy_model           | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861040.964353 | Time=2.50 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.30/300.00W
+[GPU 2] Task=copy_batch           | Batch=20 UBatch=0 | Partition=2 Target=True | StartTime=1774861040.960254 | Time=206.88 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.72/300.00W
+[GPU 2] Task=copy_batch           | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.182501 | Time=19.66 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.08/300.00W
+[GPU 2] Task=compute_forward      | Batch=20 UBatch=0 | Partition=2 Target=True | StartTime=1774861040.963384 | Time=277.77 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.08/300.00W
+[GPU 2] Task=compute_forward      | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.246590 | Time=14.57 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.08/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=20 UBatch=0 | Partition=2 Target=True | StartTime=1774861041.263512 | Time=1.19 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.08/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.266875 | Time=6.96 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.08/300.00W
+[GPU 2] Task=copy_grad            | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.208526 | Time=213.49 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.18/300.00W
+[GPU 2] Task=compute_backward     | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.263441 | Time=184.37 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.18/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861040.966553 | Time=481.04 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.18/300.00W
+[GPU 2] Task=compute_optimize     | Batch=20 UBatch=0 | Partition=2 Target=False | StartTime=1774861041.455950 | Time=28.22 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=104.57/300.00W
+
+====== Step 21 ======
+[GPU 2] Task=copy_model           | Batch=21 UBatch=0 | Partition=2 Target=True | StartTime=1774861050.161605 | Time=1.72 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.50/300.00W
+[GPU 2] Task=copy_model           | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.167115 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.50/300.00W
+[GPU 2] Task=copy_batch           | Batch=21 UBatch=0 | Partition=2 Target=True | StartTime=1774861050.163959 | Time=198.32 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.34/300.00W
+[GPU 2] Task=copy_batch           | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.365354 | Time=72.09 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.46/300.00W
+[GPU 2] Task=compute_forward      | Batch=21 UBatch=0 | Partition=2 Target=True | StartTime=1774861050.164885 | Time=274.39 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.46/300.00W
+[GPU 2] Task=compute_forward      | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.445526 | Time=14.36 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.46/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=21 UBatch=0 | Partition=2 Target=True | StartTime=1774861050.468830 | Time=2.26 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.46/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.473667 | Time=3.09 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.46/300.00W
+[GPU 2] Task=copy_grad            | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.443750 | Time=187.50 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.54/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.172779 | Time=483.56 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.54/300.00W
+[GPU 2] Task=compute_backward     | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.468857 | Time=188.32 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.54/300.00W
+[GPU 2] Task=compute_optimize     | Batch=21 UBatch=0 | Partition=2 Target=False | StartTime=1774861050.663747 | Time=30.21 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.81/300.00W
+
+====== Step 22 ======
+[GPU 2] Task=copy_model           | Batch=22 UBatch=0 | Partition=2 Target=True | StartTime=1774861059.366459 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.54/300.00W
+[GPU 2] Task=copy_model           | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.374610 | Time=4.83 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.54/300.00W
+[GPU 2] Task=copy_batch           | Batch=22 UBatch=0 | Partition=2 Target=True | StartTime=1774861059.370022 | Time=187.97 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.00/300.00W
+[GPU 2] Task=copy_batch           | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.567976 | Time=27.01 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.50/300.00W
+[GPU 2] Task=compute_forward      | Batch=22 UBatch=0 | Partition=2 Target=True | StartTime=1774861059.372207 | Time=260.49 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.50/300.00W
+[GPU 2] Task=compute_forward      | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.637461 | Time=14.97 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.50/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=22 UBatch=0 | Partition=2 Target=True | StartTime=1774861059.658843 | Time=1.40 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.50/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.668265 | Time=0.83 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.50/300.00W
+[GPU 2] Task=copy_grad            | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.599500 | Time=218.97 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+[GPU 2] Task=compute_backward     | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.661043 | Time=186.52 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.379632 | Time=466.54 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+[GPU 2] Task=compute_optimize     | Batch=22 UBatch=0 | Partition=2 Target=False | StartTime=1774861059.850235 | Time=38.81 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+
+====== Step 23 ======
+[GPU 2] Task=copy_model           | Batch=23 UBatch=0 | Partition=2 Target=True | StartTime=1774861068.564739 | Time=1.05 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.61/300.00W
+[GPU 2] Task=copy_model           | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.573809 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.61/300.00W
+[GPU 2] Task=copy_batch           | Batch=23 UBatch=0 | Partition=2 Target=True | StartTime=1774861068.569639 | Time=191.12 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.78/300.00W
+[GPU 2] Task=copy_batch           | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.769429 | Time=29.88 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.90/300.00W
+[GPU 2] Task=compute_forward      | Batch=23 UBatch=0 | Partition=2 Target=True | StartTime=1774861068.571451 | Time=260.22 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=96.90/300.00W
+[GPU 2] Task=compute_forward      | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.836971 | Time=14.74 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=96.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=23 UBatch=0 | Partition=2 Target=True | StartTime=1774861068.854447 | Time=1.09 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=96.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.857857 | Time=3.95 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=96.90/300.00W
+[GPU 2] Task=copy_grad            | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.802016 | Time=199.94 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=47% | Power=96.92/300.00W
+[GPU 2] Task=compute_backward     | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.855082 | Time=172.82 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.92/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861068.576300 | Time=450.23 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.92/300.00W
+[GPU 2] Task=compute_optimize     | Batch=23 UBatch=0 | Partition=2 Target=False | StartTime=1774861069.030896 | Time=34.65 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.92/300.00W
+
+====== Step 24 ======
+[GPU 2] Task=copy_model           | Batch=24 UBatch=0 | Partition=2 Target=True | StartTime=1774861077.769022 | Time=1.16 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.39/300.00W
+[GPU 2] Task=copy_model           | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861077.774626 | Time=2.41 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.39/300.00W
+[GPU 2] Task=copy_batch           | Batch=24 UBatch=0 | Partition=2 Target=True | StartTime=1774861077.773354 | Time=180.38 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=94.66/300.00W
+[GPU 2] Task=copy_batch           | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861077.961092 | Time=27.10 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=94.66/300.00W
+[GPU 2] Task=compute_forward      | Batch=24 UBatch=0 | Partition=2 Target=True | StartTime=1774861077.774578 | Time=250.77 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.53/300.00W
+[GPU 2] Task=compute_forward      | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861078.030095 | Time=14.78 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.53/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=24 UBatch=0 | Partition=2 Target=True | StartTime=1774861078.051007 | Time=1.35 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.53/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861078.054688 | Time=2.95 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.53/300.00W
+[GPU 2] Task=copy_grad            | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861077.990799 | Time=214.30 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.54/300.00W
+[GPU 2] Task=compute_backward     | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861078.050980 | Time=181.20 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861077.777362 | Time=454.17 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+[GPU 2] Task=compute_optimize     | Batch=24 UBatch=0 | Partition=2 Target=False | StartTime=1774861078.235692 | Time=34.46 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.59/300.00W
+
+====== Step 25 ======
+[GPU 2] Task=copy_model           | Batch=25 UBatch=0 | Partition=2 Target=True | StartTime=1774861086.982544 | Time=9.37 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.46/300.00W
+[GPU 2] Task=copy_model           | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.000061 | Time=2.32 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.46/300.00W
+[GPU 2] Task=copy_batch           | Batch=25 UBatch=0 | Partition=2 Target=True | StartTime=1774861086.991296 | Time=178.06 ms | Mem=845.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=93.07/300.00W
+[GPU 2] Task=copy_batch           | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.176650 | Time=31.30 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=93.07/300.00W
+[GPU 2] Task=compute_forward      | Batch=25 UBatch=0 | Partition=2 Target=True | StartTime=1774861086.994527 | Time=247.91 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=compute_forward      | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.249515 | Time=14.61 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=25 UBatch=0 | Partition=2 Target=True | StartTime=1774861087.268989 | Time=0.96 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.275593 | Time=1.38 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_grad            | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.222454 | Time=203.85 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.53/300.00W
+[GPU 2] Task=compute_backward     | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.269187 | Time=182.89 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.53/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861086.996140 | Time=454.63 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.53/300.00W
+[GPU 2] Task=compute_optimize     | Batch=25 UBatch=0 | Partition=2 Target=False | StartTime=1774861087.456722 | Time=33.97 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.53/300.00W
+
+====== Step 26 ======
+[GPU 2] Task=copy_model           | Batch=26 UBatch=0 | Partition=2 Target=True | StartTime=1774861096.180941 | Time=2.97 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_model           | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.192630 | Time=2.39 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_batch           | Batch=26 UBatch=0 | Partition=2 Target=True | StartTime=1774861096.188324 | Time=182.56 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.70/300.00W
+[GPU 2] Task=copy_batch           | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.383199 | Time=40.88 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.71/300.00W
+[GPU 2] Task=compute_forward      | Batch=26 UBatch=0 | Partition=2 Target=True | StartTime=1774861096.184056 | Time=256.78 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.71/300.00W
+[GPU 2] Task=compute_forward      | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.447831 | Time=14.92 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.71/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=26 UBatch=0 | Partition=2 Target=True | StartTime=1774861096.469565 | Time=1.18 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.71/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.475921 | Time=0.74 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.71/300.00W
+[GPU 2] Task=copy_grad            | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.426454 | Time=198.55 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=106.27/300.00W
+[GPU 2] Task=compute_backward     | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.470391 | Time=181.10 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.27/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.201467 | Time=450.12 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.27/300.00W
+[GPU 2] Task=compute_optimize     | Batch=26 UBatch=0 | Partition=2 Target=False | StartTime=1774861096.658758 | Time=30.98 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.27/300.00W
+
+====== Step 27 ======
+[GPU 2] Task=copy_model           | Batch=27 UBatch=0 | Partition=2 Target=True | StartTime=1774861105.387926 | Time=1.47 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_model           | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.393908 | Time=2.41 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_batch           | Batch=27 UBatch=0 | Partition=2 Target=True | StartTime=1774861105.389613 | Time=191.91 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.28/300.00W
+[GPU 2] Task=compute_forward      | Batch=27 UBatch=0 | Partition=2 Target=True | StartTime=1774861105.391169 | Time=265.33 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.29/300.00W
+[GPU 2] Task=copy_batch           | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.591250 | Time=65.40 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.29/300.00W
+[GPU 2] Task=compute_forward      | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.662577 | Time=14.85 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.29/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=27 UBatch=0 | Partition=2 Target=True | StartTime=1774861105.683355 | Time=1.38 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.29/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.689918 | Time=2.19 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.29/300.00W
+[GPU 2] Task=copy_grad            | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.664669 | Time=185.06 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.51/300.00W
+[GPU 2] Task=compute_backward     | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.683615 | Time=191.99 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.51/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.398170 | Time=476.06 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.51/300.00W
+[GPU 2] Task=compute_optimize     | Batch=27 UBatch=0 | Partition=2 Target=False | StartTime=1774861105.880348 | Time=31.83 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.51/300.00W
+
+====== Step 28 ======
+[GPU 2] Task=copy_model           | Batch=28 UBatch=0 | Partition=2 Target=True | StartTime=1774861114.600504 | Time=0.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.80/300.00W
+[GPU 2] Task=copy_model           | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.615534 | Time=2.39 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.80/300.00W
+[GPU 2] Task=copy_batch           | Batch=28 UBatch=0 | Partition=2 Target=True | StartTime=1774861114.610735 | Time=186.14 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=97.18/300.00W
+[GPU 2] Task=copy_batch           | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.809129 | Time=24.03 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=97.18/300.00W
+[GPU 2] Task=compute_forward      | Batch=28 UBatch=0 | Partition=2 Target=True | StartTime=1774861114.612830 | Time=257.01 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=97.14/300.00W
+[GPU 2] Task=compute_forward      | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.879904 | Time=14.81 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=97.14/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=28 UBatch=0 | Partition=2 Target=True | StartTime=1774861114.901384 | Time=1.32 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=97.14/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.908106 | Time=1.29 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=97.14/300.00W
+[GPU 2] Task=copy_grad            | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.848924 | Time=205.95 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=106.66/300.00W
+[GPU 2] Task=compute_backward     | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.899542 | Time=180.73 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=106.66/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861114.621222 | Time=459.57 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=106.66/300.00W
+[GPU 2] Task=compute_optimize     | Batch=28 UBatch=0 | Partition=2 Target=False | StartTime=1774861115.084499 | Time=34.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=106.66/300.00W
+
+====== Step 29 ======
+[GPU 2] Task=copy_model           | Batch=29 UBatch=0 | Partition=2 Target=True | StartTime=1774861123.808767 | Time=5.82 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.61/300.00W
+[GPU 2] Task=copy_model           | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861123.817983 | Time=2.49 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.61/300.00W
+[GPU 2] Task=copy_batch           | Batch=29 UBatch=0 | Partition=2 Target=True | StartTime=1774861123.811243 | Time=192.59 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.74/300.00W
+[GPU 2] Task=copy_batch           | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.010376 | Time=30.50 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.74/300.00W
+[GPU 2] Task=compute_forward      | Batch=29 UBatch=0 | Partition=2 Target=True | StartTime=1774861123.812550 | Time=257.92 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=96.17/300.00W
+[GPU 2] Task=compute_forward      | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.077461 | Time=19.16 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=96.17/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=29 UBatch=0 | Partition=2 Target=True | StartTime=1774861124.102705 | Time=1.24 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=96.17/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.106869 | Time=3.00 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=42% | Power=96.17/300.00W
+[GPU 2] Task=copy_grad            | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.051120 | Time=212.01 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.16/300.00W
+[GPU 2] Task=compute_backward     | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.102678 | Time=185.84 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.16/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861123.821093 | Time=468.16 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.16/300.00W
+[GPU 2] Task=compute_optimize     | Batch=29 UBatch=0 | Partition=2 Target=False | StartTime=1774861124.291593 | Time=34.90 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.16/300.00W
+
+====== Step 30 ======
+[GPU 2] Task=copy_model           | Batch=30 UBatch=0 | Partition=2 Target=True | StartTime=1774861133.013640 | Time=1.12 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.50/300.00W
+[GPU 2] Task=copy_model           | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.018632 | Time=2.99 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.50/300.00W
+[GPU 2] Task=copy_batch           | Batch=30 UBatch=0 | Partition=2 Target=True | StartTime=1774861133.015858 | Time=196.42 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.44/300.00W
+[GPU 2] Task=copy_batch           | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.222965 | Time=61.87 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.82/300.00W
+[GPU 2] Task=compute_forward      | Batch=30 UBatch=0 | Partition=2 Target=True | StartTime=1774861133.015815 | Time=269.61 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.82/300.00W
+[GPU 2] Task=compute_forward      | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.292690 | Time=14.80 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.82/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=30 UBatch=0 | Partition=2 Target=True | StartTime=1774861133.315942 | Time=1.39 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.82/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.319625 | Time=2.72 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.82/300.00W
+[GPU 2] Task=copy_grad            | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.291018 | Time=183.50 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.67/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.024074 | Time=476.63 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.67/300.00W
+[GPU 2] Task=compute_backward     | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.315916 | Time=184.99 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.67/300.00W
+[GPU 2] Task=compute_optimize     | Batch=30 UBatch=0 | Partition=2 Target=False | StartTime=1774861133.516464 | Time=20.96 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.67/300.00W
+
+====== Step 31 ======
+[GPU 2] Task=copy_model           | Batch=31 UBatch=0 | Partition=2 Target=True | StartTime=1774861142.217316 | Time=1.57 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_model           | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.227650 | Time=2.46 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_batch           | Batch=31 UBatch=0 | Partition=2 Target=True | StartTime=1774861142.219351 | Time=194.84 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.61/300.00W
+[GPU 2] Task=compute_forward      | Batch=31 UBatch=0 | Partition=2 Target=True | StartTime=1774861142.224057 | Time=264.24 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=38% | Power=96.30/300.00W
+[GPU 2] Task=copy_batch           | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.419950 | Time=67.42 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=38% | Power=96.30/300.00W
+[GPU 2] Task=compute_forward      | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.491168 | Time=14.87 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=38% | Power=96.30/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=31 UBatch=0 | Partition=2 Target=True | StartTime=1774861142.509425 | Time=1.27 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=38% | Power=96.30/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.513942 | Time=1.61 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=38% | Power=96.30/300.00W
+[GPU 2] Task=copy_grad            | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.493644 | Time=181.62 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=95.34/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.233079 | Time=468.31 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=95.34/300.00W
+[GPU 2] Task=compute_backward     | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.509399 | Time=191.32 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=95.34/300.00W
+[GPU 2] Task=compute_optimize     | Batch=31 UBatch=0 | Partition=2 Target=False | StartTime=1774861142.709480 | Time=28.53 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=11% | Power=95.34/300.00W
+
+====== Step 32 ======
+[GPU 2] Task=copy_model           | Batch=32 UBatch=0 | Partition=2 Target=True | StartTime=1774861151.430045 | Time=1.35 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.55/300.00W
+[GPU 2] Task=copy_model           | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.434624 | Time=2.49 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.55/300.00W
+[GPU 2] Task=copy_batch           | Batch=32 UBatch=0 | Partition=2 Target=True | StartTime=1774861151.431451 | Time=195.07 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.56/300.00W
+[GPU 2] Task=copy_batch           | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.633862 | Time=32.07 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=32 UBatch=0 | Partition=2 Target=True | StartTime=1774861151.432137 | Time=264.60 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=33% | Power=96.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.708159 | Time=14.67 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=33% | Power=96.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=32 UBatch=0 | Partition=2 Target=True | StartTime=1774861151.730941 | Time=5.45 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=33% | Power=96.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.745943 | Time=0.88 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=33% | Power=96.70/300.00W
+[GPU 2] Task=copy_grad            | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.669543 | Time=220.27 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=16% | Power=95.68/300.00W
+[GPU 2] Task=compute_backward     | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.734481 | Time=181.18 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=16% | Power=95.68/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.440916 | Time=475.44 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=16% | Power=95.68/300.00W
+[GPU 2] Task=compute_optimize     | Batch=32 UBatch=0 | Partition=2 Target=False | StartTime=1774861151.919075 | Time=36.23 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=16% | Power=95.68/300.00W
+
+====== Step 33 ======
+[GPU 2] Task=copy_model           | Batch=33 UBatch=0 | Partition=2 Target=True | StartTime=1774861160.707978 | Time=5.14 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_model           | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861160.722548 | Time=2.38 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_batch           | Batch=33 UBatch=0 | Partition=2 Target=True | StartTime=1774861160.711590 | Time=208.78 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.61/300.00W
+[GPU 2] Task=copy_batch           | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861160.930859 | Time=43.02 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=33 UBatch=0 | Partition=2 Target=True | StartTime=1774861160.714563 | Time=277.73 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.70/300.00W
+[GPU 2] Task=compute_forward      | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861160.997899 | Time=14.81 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=33 UBatch=0 | Partition=2 Target=True | StartTime=1774861161.015121 | Time=1.40 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.70/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861161.023679 | Time=0.81 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=95.70/300.00W
+[GPU 2] Task=copy_grad            | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861160.979199 | Time=191.15 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=95.74/300.00W
+[GPU 2] Task=compute_backward     | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861161.015057 | Time=181.11 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=104.39/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861160.715113 | Time=479.84 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=104.39/300.00W
+[GPU 2] Task=compute_optimize     | Batch=33 UBatch=0 | Partition=2 Target=False | StartTime=1774861161.200057 | Time=32.98 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=104.39/300.00W
+
+====== Step 34 ======
+[GPU 2] Task=copy_model           | Batch=34 UBatch=0 | Partition=2 Target=True | StartTime=1774861169.904736 | Time=1.50 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_model           | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861169.913736 | Time=0.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.41/300.00W
+[GPU 2] Task=copy_batch           | Batch=34 UBatch=0 | Partition=2 Target=True | StartTime=1774861169.910667 | Time=194.65 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.82/300.00W
+[GPU 2] Task=copy_batch           | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.115832 | Time=24.67 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.82/300.00W
+[GPU 2] Task=compute_forward      | Batch=34 UBatch=0 | Partition=2 Target=True | StartTime=1774861169.911217 | Time=269.76 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.21/300.00W
+[GPU 2] Task=compute_forward      | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.187474 | Time=14.50 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.21/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=34 UBatch=0 | Partition=2 Target=True | StartTime=1774861170.209083 | Time=1.25 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.21/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.214507 | Time=0.98 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.21/300.00W
+[GPU 2] Task=copy_grad            | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.142975 | Time=222.97 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.24/300.00W
+[GPU 2] Task=compute_backward     | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.207880 | Time=183.84 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.32/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861169.911996 | Time=479.45 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.32/300.00W
+[GPU 2] Task=compute_optimize     | Batch=34 UBatch=0 | Partition=2 Target=False | StartTime=1774861170.397055 | Time=15.01 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.32/300.00W
+
+====== Step 35 ======
+[GPU 2] Task=copy_model           | Batch=35 UBatch=0 | Partition=2 Target=True | StartTime=1774861179.110660 | Time=2.81 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.43/300.00W
+[GPU 2] Task=copy_model           | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.116557 | Time=4.81 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.43/300.00W
+[GPU 2] Task=copy_batch           | Batch=35 UBatch=0 | Partition=2 Target=True | StartTime=1774861179.111938 | Time=196.65 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=copy_batch           | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.318172 | Time=24.05 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=compute_forward      | Batch=35 UBatch=0 | Partition=2 Target=True | StartTime=1774861179.114386 | Time=266.87 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=compute_forward      | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.386374 | Time=14.73 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=35 UBatch=0 | Partition=2 Target=True | StartTime=1774861179.405153 | Time=2.53 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.411531 | Time=0.87 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.07/300.00W
+[GPU 2] Task=copy_grad            | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.344620 | Time=225.16 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.11/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.121609 | Time=474.87 ms | Mem=743.69 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.11/300.00W
+[GPU 2] Task=compute_backward     | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.405126 | Time=193.27 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.11/300.00W
+[GPU 2] Task=compute_optimize     | Batch=35 UBatch=0 | Partition=2 Target=False | StartTime=1774861179.610899 | Time=23.79 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.11/300.00W
+
+====== Step 36 ======
+[GPU 2] Task=copy_model           | Batch=36 UBatch=0 | Partition=2 Target=True | StartTime=1774861188.328255 | Time=1.49 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.53/300.00W
+[GPU 2] Task=copy_model           | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.333402 | Time=4.90 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.53/300.00W
+[GPU 2] Task=copy_batch           | Batch=36 UBatch=0 | Partition=2 Target=True | StartTime=1774861188.331030 | Time=206.52 ms | Mem=599.13 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.67/300.00W
+[GPU 2] Task=copy_batch           | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.544766 | Time=29.25 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.67/300.00W
+[GPU 2] Task=compute_forward      | Batch=36 UBatch=0 | Partition=2 Target=True | StartTime=1774861188.331315 | Time=279.57 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.68/300.00W
+[GPU 2] Task=compute_forward      | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.615578 | Time=14.87 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.68/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=36 UBatch=0 | Partition=2 Target=True | StartTime=1774861188.634707 | Time=1.12 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.68/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.637996 | Time=6.46 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.68/300.00W
+[GPU 2] Task=copy_grad            | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.578457 | Time=213.35 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.73/300.00W
+[GPU 2] Task=compute_backward     | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.635445 | Time=183.11 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.07/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.336995 | Time=480.41 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.07/300.00W
+[GPU 2] Task=compute_optimize     | Batch=36 UBatch=0 | Partition=2 Target=False | StartTime=1774861188.821172 | Time=34.94 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=106.07/300.00W
+
+====== Step 37 ======
+[GPU 2] Task=copy_model           | Batch=37 UBatch=0 | Partition=2 Target=True | StartTime=1774861197.542868 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.46/300.00W
+[GPU 2] Task=copy_model           | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.552099 | Time=0.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.46/300.00W
+[GPU 2] Task=copy_batch           | Batch=37 UBatch=0 | Partition=2 Target=True | StartTime=1774861197.544811 | Time=200.36 ms | Mem=746.88 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.39/300.00W
+[GPU 2] Task=copy_batch           | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.752896 | Time=55.04 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.42/300.00W
+[GPU 2] Task=compute_forward      | Batch=37 UBatch=0 | Partition=2 Target=True | StartTime=1774861197.547973 | Time=264.63 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.42/300.00W
+[GPU 2] Task=compute_forward      | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.820035 | Time=14.93 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.42/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=37 UBatch=0 | Partition=2 Target=True | StartTime=1774861197.838486 | Time=6.87 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.42/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.848588 | Time=0.91 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=48% | Power=96.42/300.00W
+[GPU 2] Task=copy_grad            | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.810745 | Time=182.18 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=96.49/300.00W
+[GPU 2] Task=compute_backward     | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.844464 | Time=173.96 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.78/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861197.549616 | Time=467.87 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.78/300.00W
+[GPU 2] Task=compute_optimize     | Batch=37 UBatch=0 | Partition=2 Target=False | StartTime=1774861198.022251 | Time=36.09 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.78/300.00W
+
+====== Step 38 ======
+[GPU 2] Task=copy_model           | Batch=38 UBatch=0 | Partition=2 Target=True | StartTime=1774861206.758675 | Time=1.12 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.29/300.00W
+[GPU 2] Task=copy_model           | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861206.763062 | Time=2.32 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.29/300.00W
+[GPU 2] Task=copy_batch           | Batch=38 UBatch=0 | Partition=2 Target=True | StartTime=1774861206.761256 | Time=206.28 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.22/300.00W
+[GPU 2] Task=copy_batch           | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861206.975893 | Time=27.37 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.24/300.00W
+[GPU 2] Task=compute_forward      | Batch=38 UBatch=0 | Partition=2 Target=True | StartTime=1774861206.761792 | Time=277.38 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.24/300.00W
+[GPU 2] Task=compute_forward      | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861207.045571 | Time=14.90 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.24/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=38 UBatch=0 | Partition=2 Target=True | StartTime=1774861207.066546 | Time=1.43 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.24/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861207.076484 | Time=5.93 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=50% | Power=96.24/300.00W
+[GPU 2] Task=copy_grad            | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861207.005686 | Time=221.52 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.61/300.00W
+[GPU 2] Task=compute_backward     | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861207.066519 | Time=186.62 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.61/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861206.786504 | Time=470.55 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.61/300.00W
+[GPU 2] Task=compute_optimize     | Batch=38 UBatch=0 | Partition=2 Target=False | StartTime=1774861207.259222 | Time=30.76 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=1% | Power=105.61/300.00W
+
+====== Step 39 ======
+[GPU 2] Task=copy_model           | Batch=39 UBatch=0 | Partition=2 Target=True | StartTime=1774861215.966053 | Time=1.11 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_model           | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861215.972197 | Time=0.00 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_batch           | Batch=39 UBatch=0 | Partition=2 Target=True | StartTime=1774861215.969931 | Time=192.19 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.49/300.00W
+[GPU 2] Task=copy_batch           | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.168194 | Time=35.16 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.49/300.00W
+[GPU 2] Task=compute_forward      | Batch=39 UBatch=0 | Partition=2 Target=True | StartTime=1774861215.969207 | Time=266.49 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=compute_forward      | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.241975 | Time=14.89 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=39 UBatch=0 | Partition=2 Target=True | StartTime=1774861216.262889 | Time=2.14 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.270560 | Time=0.97 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=49% | Power=96.43/300.00W
+[GPU 2] Task=copy_grad            | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.207718 | Time=209.22 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.74/300.00W
+[GPU 2] Task=compute_backward     | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.263813 | Time=178.76 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.74/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861215.978790 | Time=464.60 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.74/300.00W
+[GPU 2] Task=compute_optimize     | Batch=39 UBatch=0 | Partition=2 Target=False | StartTime=1774861216.451922 | Time=27.27 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=105.74/300.00W
+
+====== Step 40 ======
+[GPU 2] Task=copy_model           | Batch=40 UBatch=0 | Partition=2 Target=True | StartTime=1774861225.171103 | Time=1.09 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_model           | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.175811 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.45/300.00W
+[GPU 2] Task=copy_batch           | Batch=40 UBatch=0 | Partition=2 Target=True | StartTime=1774861225.173836 | Time=197.66 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.30/300.00W
+[GPU 2] Task=copy_batch           | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.381864 | Time=9.35 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.30/300.00W
+[GPU 2] Task=compute_forward      | Batch=40 UBatch=0 | Partition=2 Target=True | StartTime=1774861225.174177 | Time=268.86 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.15/300.00W
+[GPU 2] Task=compute_forward      | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.446460 | Time=14.80 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.15/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=40 UBatch=0 | Partition=2 Target=True | StartTime=1774861225.468446 | Time=1.20 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.15/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.473070 | Time=3.34 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=46% | Power=96.15/300.00W
+[GPU 2] Task=copy_grad            | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.393838 | Time=232.04 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=5% | Power=105.21/300.00W
+[GPU 2] Task=compute_backward     | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.470197 | Time=181.38 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=5% | Power=105.21/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.180615 | Time=470.99 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=5% | Power=105.21/300.00W
+[GPU 2] Task=compute_optimize     | Batch=40 UBatch=0 | Partition=2 Target=False | StartTime=1774861225.658905 | Time=13.79 ms | Mem=598.88 MB | MaxMem=1837.82 MB | GpuUtil=5% | Power=105.21/300.00W
+
+====== Step 41 ======
+[GPU 2] Task=copy_model           | Batch=41 UBatch=0 | Partition=2 Target=True | StartTime=1774861234.376630 | Time=1.15 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.53/300.00W
+[GPU 2] Task=copy_model           | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.381408 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.53/300.00W
+[GPU 2] Task=copy_batch           | Batch=41 UBatch=0 | Partition=2 Target=True | StartTime=1774861234.378515 | Time=191.32 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.79/300.00W
+[GPU 2] Task=copy_batch           | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.573638 | Time=32.91 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.79/300.00W
+[GPU 2] Task=compute_forward      | Batch=41 UBatch=0 | Partition=2 Target=True | StartTime=1774861234.379227 | Time=261.87 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.20/300.00W
+[GPU 2] Task=compute_forward      | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.649153 | Time=14.66 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.20/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=41 UBatch=0 | Partition=2 Target=True | StartTime=1774861234.672369 | Time=1.61 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.20/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.683600 | Time=2.99 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=41% | Power=96.20/300.00W
+[GPU 2] Task=copy_grad            | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.612872 | Time=224.79 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.22/300.00W
+[GPU 2] Task=compute_backward     | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.673532 | Time=189.81 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.22/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.386119 | Time=476.28 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.22/300.00W
+[GPU 2] Task=compute_optimize     | Batch=41 UBatch=0 | Partition=2 Target=False | StartTime=1774861234.868818 | Time=23.81 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=7% | Power=103.22/300.00W
+
+====== Step 42 ======
+[GPU 2] Task=copy_model           | Batch=42 UBatch=0 | Partition=2 Target=True | StartTime=1774861243.587071 | Time=2.41 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.49/300.00W
+[GPU 2] Task=copy_model           | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.596941 | Time=2.40 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=0% | Power=86.49/300.00W
+[GPU 2] Task=copy_batch           | Batch=42 UBatch=0 | Partition=2 Target=True | StartTime=1774861243.594872 | Time=182.42 ms | Mem=574.50 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=96.56/300.00W
+[GPU 2] Task=copy_batch           | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.785985 | Time=27.56 ms | Mem=623.63 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=96.56/300.00W
+[GPU 2] Task=compute_forward      | Batch=42 UBatch=0 | Partition=2 Target=True | StartTime=1774861243.594746 | Time=257.81 ms | Mem=599.00 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.90/300.00W
+[GPU 2] Task=compute_forward      | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.856083 | Time=16.74 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=42 UBatch=0 | Partition=2 Target=True | StartTime=1774861243.875223 | Time=1.41 ms | Mem=1800.19 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.90/300.00W
+[GPU 2] Task=copy_batch_out       | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.882354 | Time=0.96 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=39% | Power=95.90/300.00W
+[GPU 2] Task=copy_grad            | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.817867 | Time=209.26 ms | Mem=1775.57 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.82/300.00W
+[GPU 2] Task=compute_backward     | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.876965 | Time=176.99 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.82/300.00W
+[GPU 2] Task=copy_grad_out        | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861243.600892 | Time=452.03 ms | Mem=670.19 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.82/300.00W
+[GPU 2] Task=compute_optimize     | Batch=42 UBatch=0 | Partition=2 Target=False | StartTime=1774861244.056401 | Time=18.69 ms | Mem=574.38 MB | MaxMem=1837.82 MB | GpuUtil=9% | Power=102.82/300.00W

@@ -11,6 +11,7 @@ FAILOVER_EXIT_CODE=42
 BASE_SAVE_ROOT="${BASE_SAVE_ROOT:-./results}"
 RUN_NOTE="${RUN_NOTE:-e2e_failover}"
 RUN_DIR="${BASE_SAVE_ROOT}/${RUN_NOTE}"
+E2E_SUMMARY_PATH="${RUN_DIR}/e2e_summary.log"
 SOFT_RESTART_CONFIG_PATH="${RUN_DIR}/failover_restart_config.json"
 HARD_RESTART_CONFIG_PATH="${RUN_DIR}/emergency_restart_config.json"
 LEGACY_RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
@@ -63,6 +64,7 @@ echo "[E2E] Starting failover loop..."
 
 # Measure end-to-end wall-clock time across all restarts
 E2E_START_TIME=$(date +%s)
+E2E_START_TS=$(date '+%Y-%m-%d %H:%M:%S')
 
 while true; do
   GPU_ASSIGNMENT=""
@@ -180,11 +182,11 @@ PY
   export FAILOVER_INJECT_SCENARIO="${FAILOVER_INJECT_SCENARIO:=}"
   export FAILOVER_TEST_FAST_GATES="${FAILOVER_TEST_FAST_GATES:=}"
   
-  # For E2E quick tests: use shorter slowdown threshold (1 second instead of 30)
-  # Set FAILOVER_SLOWDOWN_THRESHOLD_SEC=30 to restore production behavior
-  if [[ -z "${FAILOVER_SLOWDOWN_THRESHOLD_SEC:-}" && -n "${FAILOVER_INJECT_SCENARIO}" ]]; then
-    export FAILOVER_SLOWDOWN_THRESHOLD_SEC="1.0"
-    echo "[E2E] Using fast slowdown threshold: 1.0s (for quick testing with scenario injection)"
+  # 기본 slowdown 지속 시간 게이트를 10초로 고정
+  # (FAILOVER_SLOWDOWN_THRESHOLD_SEC를 외부에서 지정하면 그 값을 우선 사용)
+  if [[ -z "${FAILOVER_SLOWDOWN_THRESHOLD_SEC:-}" ]]; then
+    export FAILOVER_SLOWDOWN_THRESHOLD_SEC="10.0"
+    echo "[E2E] Using default slowdown threshold: 10.0s"
   fi
   
   if [[ -n "${FAILOVER_INJECT_SCENARIO}" ]]; then
@@ -219,8 +221,11 @@ PY
     fi
     E2E_ELAPSED_MIN=$((E2E_ELAPSED_SEC / 60))
     E2E_ELAPSED_REM=$((E2E_ELAPSED_SEC % 60))
-    echo "[E2E] Total wall-clock time: ${E2E_ELAPSED_SEC}s (${E2E_ELAPSED_MIN}m ${E2E_ELAPSED_REM}s)"
-    echo "[E2E] Training completed normally. Exiting launcher."
+    E2E_END_TS=$(date '+%Y-%m-%d %H:%M:%S')
+    echo "[E2E] Start time: ${E2E_START_TS}" | tee -a "${E2E_SUMMARY_PATH}"
+    echo "[E2E] End time:   ${E2E_END_TS}" | tee -a "${E2E_SUMMARY_PATH}"
+    echo "[E2E] Total wall-clock time: ${E2E_ELAPSED_SEC}s (${E2E_ELAPSED_MIN}m ${E2E_ELAPSED_REM}s)" | tee -a "${E2E_SUMMARY_PATH}"
+    echo "[E2E] Training completed normally. Exiting launcher." | tee -a "${E2E_SUMMARY_PATH}"
     break
   fi
 

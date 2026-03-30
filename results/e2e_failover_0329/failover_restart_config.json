@@ -1,0 +1,79 @@
+{
+  "timestamp": 1774772038.4885652,
+  "trigger_policy": "REPLAN",
+  "step_id": 110,
+  "partition": {
+    "gpu_assignment": [
+      0,
+      1,
+      2,
+      3
+    ],
+    "snet_partition": [
+      9,
+      10,
+      16,
+      22
+    ],
+    "tnet_partition": [
+      9,
+      5,
+      6,
+      10
+    ],
+    "snet_stage_boundaries": [
+      [
+        0,
+        9
+      ],
+      [
+        9,
+        19
+      ],
+      [
+        19,
+        35
+      ],
+      [
+        35,
+        57
+      ]
+    ],
+    "tnet_stage_boundaries": [
+      [
+        0,
+        9
+      ],
+      [
+        9,
+        14
+      ],
+      [
+        14,
+        20
+      ],
+      [
+        20,
+        30
+      ]
+    ]
+  },
+  "alpha_comp": {
+    "0": 0.9958633461225337,
+    "1": 0.9681481810961716,
+    "2": 0.854929180421154,
+    "3": 0.7406307330551772
+  },
+  "beta_comm": {
+    "0": 1.1598397768948563,
+    "1": 1.0417589343963884,
+    "2": 0.9714323940778797,
+    "3": 0.9847989255670357
+  },
+  "restart_overhead": {
+    "formula": "4.37 + 50 * T_base",
+    "t_base": 1.5853001903499666,
+    "value": 83.63500951749833
+  },
+  "checkpoint_path": "./results/e2e_failover_0329/failover_checkpoint_latest.pth"
+}
