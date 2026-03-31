@@ -51,6 +51,52 @@ cond_info_print = null_print   # Log.d
 
 global_tensor_uuid_count = 0
 
+def _ensure_profile_extra(ctx):
+    if not hasattr(ctx, "_profile_extra") or not isinstance(ctx._profile_extra, dict):
+        ctx._profile_extra = {}
+    return ctx._profile_extra
+
+
+def _acc_profile_extra(ctx, key: str, delta_ms: float):
+    extra = _ensure_profile_extra(ctx)
+    extra[key] = float(extra.get(key, 0.0) or 0.0) + float(delta_ms)
+
+
+def timed_queue_get(q, ctx):
+    t0 = time.time()
+    item = q.get()
+    _acc_profile_extra(ctx, "queue_wait_ms", (time.time() - t0) * 1000.0)
+    return item
+
+
+def timed_queue_get_nowait_or_wait(q, ctx):
+    try:
+        return q.get_nowait()
+    except Empty:
+        t0 = time.time()
+        item = q.get()
+        _acc_profile_extra(ctx, "queue_wait_ms", (time.time() - t0) * 1000.0)
+        return item
+
+
+def timed_stream_synchronize(stream, ctx):
+    t0 = time.time()
+    stream.synchronize()
+    _acc_profile_extra(ctx, "sync_wait_ms", (time.time() - t0) * 1000.0)
+    
+
+def maybe_inject_worker_slowdown(ctx: 'GpuTaskContext', task: 'GpuTask'):
+    worker = getattr(ctx, "worker", None)
+    if worker is None:
+        return
+
+    sleep_sec = worker.get_task_injected_sleep_sec(task)
+    if sleep_sec <= 0:
+        return
+
+    time.sleep(sleep_sec)
+    _acc_profile_extra(ctx, "injected_sleep_ms", sleep_sec * 1000.0)
+    worker.log_task_slowdown_injection(task, sleep_sec)
 
 def issue_tensor_uuid() -> int:
     global global_tensor_uuid_count
@@ -90,6 +136,8 @@ def slice_parameters(given_dev_allocation: List[int], lst: List[Optional[Tensor]
 
 
 def compute_loss(ctx: 'GpuTaskContext', task: 'GpuTask'):
+    maybe_inject_worker_slowdown(ctx, task)
+
     with Operation('loss', task.batch_id, task.view_id, task.ubatch_id, task.is_target, None, task.partition_id):
         batch_online_view_1 = [None for _ in range(ctx.num_ubatch)]
         batch_target_view_2 = [None for _ in range(ctx.num_ubatch)]
@@ -104,14 +152,13 @@ def compute_loss(ctx: 'GpuTaskContext', task: 'GpuTask'):
         ubatches_to_collect = (ctx.num_ubatch * 2) if task.asymmetric else (ctx.num_ubatch * 2 * 2)
 
         for _ in range(ubatches_to_collect):
-            ubatch = ctx.queue_loss_compute_in.get()
+            ubatch = timed_queue_get(ctx.queue_loss_compute_in, ctx)
             ctx.device_state.in_memory_ubatch_count -= 1
             ctx.device_state.in_memory_ubatch_bytes -= get_bytes(ubatch.data.value)
             assert ubatch.batch_id == task.batch_id
 
             batch = ubatch.data.detach()
 
-            # register hook to collect gradient
             if not ubatch.is_target:
                 bwd_multiple = num_bwd_ubatch // ctx.num_ubatch
                 sc_ubatches = task.scatter_gather_fn.scatter(batch.value, bwd_multiple)
@@ -146,7 +193,6 @@ def compute_loss(ctx: 'GpuTaskContext', task: 'GpuTask'):
                                          "if their output is not a Tensor.")
                     del hook_save_gradient
 
-                # Scatter and Gather
                 batch = Batch(task.scatter_gather_fn.gather(sc_ubatches))
                 del sc_ubatch
                 del sc_ubatches
@@ -167,7 +213,7 @@ def compute_loss(ctx: 'GpuTaskContext', task: 'GpuTask'):
         ctx.device_state.print_mem_stat()
 
         if task.asymmetric:
-            target_ubatch = ctx.queue_copy_label_in.get()
+            target_ubatch = timed_queue_get(ctx.queue_copy_label_in, ctx)
             assert target_ubatch.batch_id == task.batch_id
 
             batch_online_view_1 = task.scatter_gather_fn.gather(batch_online_view_1)
@@ -206,13 +252,11 @@ def compute_loss(ctx: 'GpuTaskContext', task: 'GpuTask'):
                                        batch_target_view_1, batch_target_view_2, ctx.args, ctx.extra_args)
             ctx.queue_loss_out.put((task.batch_id, loss.detach().cpu().item()))
 
-        # calculate backward for loss here
         stream = ctx.find_stream(task.src_stream)
         with use_stream(stream):
-            stream.synchronize()
-            # grad_tensors is set to None, as performing backward regarding scalar tensor assumes its gradient to 1.
+            timed_stream_synchronize(stream, ctx)
             torch.autograd.backward(loss, grad_tensors=None)
-        stream.synchronize()
+        timed_stream_synchronize(stream, ctx)
 
         # enqueue in reversed order
         if task.asymmetric:
@@ -233,9 +277,9 @@ def compute_backward(ctx: 'GpuTaskContext', task: 'GpuTask'):
     if ctx.num_ubatch > 1:
         activations = ctx.activation.pop(task.batch_id, task.view_id, task.ubatch_id)[()]
         ctx.device_state.in_memory_activation_bytes -= get_bytes(activations)
-        bl_grad: BatchList = ctx.queue_grad_copy.get()
+        bl_grad: BatchList = timed_queue_get(ctx.queue_grad_copy, ctx)
     else:
-        bl_grad: BatchList = ctx.queue_grad_copy.get()
+        bl_grad: BatchList = timed_queue_get(ctx.queue_grad_copy, ctx)
         activations = ctx.activation.pop(task.batch_id, task.view_id, task.ubatch_id)[()]
         ctx.device_state.in_memory_activation_bytes -= get_bytes(activations)
 
@@ -246,13 +290,16 @@ def compute_backward(ctx: 'GpuTaskContext', task: 'GpuTask'):
         gradients = bl_grad.grad
     elif isinstance(bl_grad.grad, torch.Tensor):
         gradients = {tuple(): bl_grad.grad}
+    else:
+        gradients = {}
+
+    maybe_inject_worker_slowdown(ctx, task)
 
     with Operation('backward', task.batch_id, task.view_id, task.ubatch_id, task.is_target, None, task.partition_id):
         stream = ctx.find_stream(task.src_stream)
         tx_stream = ctx.find_stream(task.wait_stream)
         with use_stream(stream):
-            stream.synchronize()
-            # Reset grad for each param when necessary
+            timed_stream_synchronize(stream, ctx)
             if ctx.num_ubatch == task.ubatch_id + 1 and (task.asymmetric or task.view_id == 1):
                 for param in ctx.partition_online.parameters():
                     param.grad = None
@@ -260,9 +307,9 @@ def compute_backward(ctx: 'GpuTaskContext', task: 'GpuTask'):
                 def do_backward(activation: torch.Tensor, gradient: torch.Tensor):
                     torch.autograd.backward(activation, grad_tensors=gradient)
                 traverse_path_apply(activation, path, partial(do_backward, gradient=gradient))
-        stream.synchronize()
-        tx_stream.synchronize()
-        del gradient
+        timed_stream_synchronize(stream, ctx)
+        timed_stream_synchronize(tx_stream, ctx)
+
         del gradients
 
         if ctx.gradient.has(task.batch_id, task.view_id, task.ubatch_id):
@@ -270,7 +317,6 @@ def compute_backward(ctx: 'GpuTaskContext', task: 'GpuTask'):
             for t in output_grad.values():
                 ctx.device_state.in_memory_gradient_bytes -= get_bytes(t)
             assert all((not g.requires_grad) for g in output_grad.values())
-            # emit the grad to next partition
             bl_output = BatchList(task.batch_id, grad=output_grad)
             del output_grad
         else:
@@ -289,19 +335,20 @@ def compute_backward(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
 
 def copy_grad_out(ctx: 'GpuTaskContext', task: 'GpuTask'):
-
-    bl_output = ctx.queue_grad_pending.get()
+    bl_output = timed_queue_get(ctx.queue_grad_pending, ctx)
     tx_stream = ctx.find_stream(task.wait_stream)
+
+    maybe_inject_worker_slowdown(ctx, task)
+
     if ctx.queue_grad_out is not None:
         with Operation('cp_tx_grad', task.batch_id, task.view_id,
                        task.ubatch_id, task.is_target, None, task.partition_id), \
              Operation('cp_rx_grad', task.batch_id, task.view_id,
                        task.ubatch_id, task.is_target, None, task.partition_id - 1):
             with use_stream(tx_stream):
-                tx_stream.synchronize()
+                timed_stream_synchronize(tx_stream, ctx)
                 ctx.queue_grad_out.put(bl_output)
-            tx_stream.synchronize()
-
+            timed_stream_synchronize(tx_stream, ctx)
 
 def copy_grad_out_condition(ctx: 'GpuTaskContext', task: 'GpuTask'):
     if not ctx.config['gpipe_emulation']['enabled']:
@@ -333,7 +380,6 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
                 ctx.config['async_param_update_emulation']['enabled'])
         cond_info_print(f"Update expected_online_model_id here! now {ctx.device_state.expected_online_model_id} {task}")
 
-    # pre-process momentum / LR update
     if task.new_momentum is not None:
         Log.i(f"Momentum is updated at batch {task.batch_id}: {ctx.momentum} -> {task.new_momentum}")
         ctx.momentum = task.new_momentum
@@ -346,6 +392,8 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
             for param_group in ctx.optimizer.param_groups:
                 Log.v(f"LR is updated at batch {task.batch_id}: {param_group['lr']} -> {task.new_lr}")
                 param_group['lr'] = task.new_lr
+
+    maybe_inject_worker_slowdown(ctx, task)
 
     with Operation('optimize', task.batch_id, task.view_id, task.ubatch_id, task.is_target, None, task.partition_id):
         online_prev_param = list(ctx.partition_online.parameters())
@@ -362,7 +410,6 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
                 for p in chain(ctx.params_online.storage.values(), ctx.params_target.storage.values())
                 for t in p)
 
-        # skip optimization on gradient accumulation / skip_optimizer is active
         should_skip_optimization = ctx.config['optimizer']['skip_optimizer'] or \
             ((ctx.num_grad_accumulation + 1) % ctx.config['optimizer']['gradient_accumulation'] != 0 and
              not task.optimizer_step)
@@ -371,7 +418,6 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
             if ctx.config['optimizer']['gradient_accumulation'] > 1:
                 ctx.num_grad_accumulation += 1
             else:
-                # free out gradients, as we don't need this
                 ctx.optimizer.zero_grad()
 
             ctx.params_online.push(task.batch_id, online_prev_param)
@@ -386,22 +432,20 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
         compute_stream = ctx.get_stream(StreamType.STREAM_DEFAULT_COMPUTE)
         with use_stream(compute_stream):
-            # If using gradient accumulation, average out gradients
             if ctx.config['optimizer']['gradient_accumulation'] > 1:
                 for pg in ctx.optimizer.param_groups:
                     param: torch.Tensor
                     for param in pg['params']:
                         if param.grad is not None:
-                            param.grad /= (ctx.num_grad_accumulation + 1)  # average out gradient
+                            param.grad /= (ctx.num_grad_accumulation + 1)
                 ctx.num_grad_accumulation = 0
 
-            # step optimizer
             ctx.optimizer.step()
             ctx.optimizer.zero_grad()
             online_new_param = [t.detach().clone() for t in online_prev_param]
 
-        compute_stream.synchronize()
-        del online_prev_param  # not valid anymore
+        timed_stream_synchronize(compute_stream, ctx)
+        del online_prev_param
 
         if ctx.update_target_fn is None:
             target_new_param = target_prev_param
@@ -416,7 +460,6 @@ def compute_optimize_gpu(ctx: 'GpuTaskContext', task: 'GpuTask'):
                 for p in chain(ctx.params_online.storage.values(), ctx.params_target.storage.values())
                 for t in p)
 
-        # Update expected_online_model_id here
         update_expected_online_model_id()
 
 
@@ -432,8 +475,7 @@ def update_target_model_id_after_forward_pass(ctx: 'GpuTaskContext', task: 'GpuT
 
 
 def compute_forward(ctx: 'GpuTaskContext', task: 'GpuTask'):
-    # Pull previous compute results
-    ubatch: Microbatch = ctx.queue_compute_in.get()
+    ubatch: Microbatch = timed_queue_get(ctx.queue_compute_in, ctx)
     ctx.device_state.in_memory_ubatch_bytes -= get_bytes(ubatch.data.value)
     if ubatch.data is None:
         return
@@ -459,7 +501,6 @@ def compute_forward(ctx: 'GpuTaskContext', task: 'GpuTask'):
         ctx.gradient.push(ubatch, path)
         ctx.device_state.in_memory_gradient_bytes += get_bytes(ubatch.data.value)
 
-    # check validity for atomic batch
     if batch.atomic:
         assert batch.tensor.device.index == task.device_id
         if task.is_target:
@@ -470,6 +511,8 @@ def compute_forward(ctx: 'GpuTaskContext', task: 'GpuTask'):
     compute_stream = ctx.get_stream(StreamType.STREAM_DEFAULT_COMPUTE)
     copy_dst_stream = ctx.get_stream(StreamType.STREAM_COPY_BATCH_TO)
     wait_stream(compute_stream, copy_dst_stream)
+
+    maybe_inject_worker_slowdown(ctx, task)
 
     profile_semantic(task.batch_id, task.view_id, task.ubatch_id, task.is_target, None, task.partition_id, 'compute')
     lst_activation_batch = []
@@ -500,14 +543,13 @@ def compute_forward(ctx: 'GpuTaskContext', task: 'GpuTask'):
                 if isinstance(batch_out.value, torch.Tensor):
                     pass
                 elif isinstance(batch_out.value, TSPipeModelOutput):
-                    # prepare lst_require_grad_tensor_path for forward op at the next gpu
                     batch_out.value.lst_require_grad_tensor_path = find_path_tensor_requires_grad(batch_out.value.data)
                 else:
                     raise ValueError("Models must be wrapped with TSPipeModelWrapper if their output is not a Tensor.")
 
             lst_activation_batch.append(batch_out)
             del batch_out
-        compute_stream.synchronize()
+        timed_stream_synchronize(compute_stream, ctx)
         del batch_lst
         del b
     del batch
@@ -527,11 +569,9 @@ def compute_forward(ctx: 'GpuTaskContext', task: 'GpuTask'):
             ctx.device_state.in_memory_activation_bytes += get_bytes(activation.data.value)
     del lst_activation_batch
     ctx.device_state.print_mem_stat()
-    # for last partition, queue_compute_out will directly send ubatch to loss calculation
     if task.partition_id == ctx.num_partitions - 1:
         update_target_model_id_after_forward_pass(ctx, task)
 
-    # for emulating gpipe
     ctx.device_state.forward_complete_ubatch_count += 1
 
 
@@ -583,15 +623,17 @@ def feed_batch(ctx: 'LocalTaskContext', task: 'GpuTask'):
 
 
 def copy_batch_out(ctx: 'GpuTaskContext', task: 'GpuTask'):
-    ubatch = ctx.queue_compute_out.get()
-    # NCCL Backend will start copying here
+    ubatch = timed_queue_get(ctx.queue_compute_out, ctx)
+
+    maybe_inject_worker_slowdown(ctx, task)
+
     with Operation('cp_rx_batch', task.batch_id, task.view_id,
                    task.ubatch_id, task.is_target, None, task.partition_id+1),\
          Operation('cp_tx_batch', task.batch_id, task.view_id,
                    task.ubatch_id, task.is_target, None, task.partition_id):
         ctx.device_state.in_memory_ubatch_count -= 1
         ctx.device_state.in_memory_ubatch_bytes -= get_bytes(ubatch.data.value)
-        ctx.queue_copy_curr_out.put(ubatch)  # TODO: Possible blocking here
+        ctx.queue_copy_curr_out.put(ubatch)
         ctx.device_state.print_mem_stat()
 
     update_target_model_id_after_forward_pass(ctx, task)
@@ -636,38 +678,33 @@ def copy_batch_condition(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
 def copy_batch(ctx: 'GpuTaskContext', task: 'GpuTask'):
     if task.partition_id != 0:
-        ubatch_curr = ctx.queue_copy_curr_in.get()
+        ubatch_curr = timed_queue_get(ctx.queue_copy_curr_in, ctx)
     else:
-        try:
-            ubatch_curr = ctx.queue_copy_curr_in.get_nowait()
-        except Empty:
-            wait_start = time.time()
-            ubatch_curr = ctx.queue_copy_curr_in.get()
-            Log.d(f"Waited for new ubatch for {(time.time() - wait_start)*1000:.3} ms..")
+        ubatch_curr = timed_queue_get_nowait_or_wait(ctx.queue_copy_curr_in, ctx)
+
     assert ubatch_curr.data is not None
     assert task.batch_id == ubatch_curr.batch_id and task.ubatch_id == ubatch_curr.ubatch_id
+
+    maybe_inject_worker_slowdown(ctx, task)
 
     gpu_rx_stream = ctx.get_stream(StreamType.STREAM_COPY_BATCH_TO)
     gpu_compute_stream = ctx.get_stream(StreamType.STREAM_DEFAULT_COMPUTE)
 
-    # implement tensor traversal
     input_ubatch_val = ubatch_curr.data.value
     cpu_to_gpu_copy = False
 
     def _internal_tensor_copy(t: torch.Tensor):
         if t.is_cuda:
-            # this was already copied to me using NCCL backend!
             ctx.device_state.in_memory_ubatch_bytes += get_bytes(t)
             return t
         else:
-            # CPU -> GPU copy here
             with use_stream(gpu_rx_stream):
-                gpu_rx_stream.synchronize()
+                timed_stream_synchronize(gpu_rx_stream, ctx)
                 x = t
                 y = x.detach().to(get_device(gpu_rx_stream))
             record_stream(y, gpu_compute_stream)
             wait_stream(gpu_compute_stream, gpu_rx_stream)
-            gpu_rx_stream.synchronize()
+            timed_stream_synchronize(gpu_rx_stream, ctx)
             output = y
             ctx.device_state.in_memory_ubatch_bytes += get_bytes(output)
             assert not y.requires_grad, "Output should not require grad!"
@@ -686,11 +723,11 @@ def copy_batch(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
 
 def copy_grad(ctx: 'GpuTaskContext', task: 'GpuTask'):
-    """Dequeue from `ctx.queue_grad_in`, copy tensor to `task.dst_stream`, and Enqueue to `ctx.queue_grad_out`.
-    """
-    # this was already copied to me using NCCL backend!
-    batch_lst: BatchList = ctx.queue_grad_in.get()
+    batch_lst: BatchList = timed_queue_get(ctx.queue_grad_in, ctx)
     assert task.batch_id == batch_lst.batch_id
+
+    maybe_inject_worker_slowdown(ctx, task)
+
     ctx.queue_grad_copy.put(batch_lst)
 
 
@@ -721,6 +758,8 @@ def copy_model(ctx: 'GpuTaskContext', task: 'GpuTask'):
     model = ctx.partition_target if task.is_target else ctx.partition_online
 
     if parameters is not None:
+        maybe_inject_worker_slowdown(ctx, task)
+
         src_stream = ctx.get_stream(StreamType.STREAM_COPY_BATCH_TO)
         profile_semantic(task.batch_id, task.view_id, task.ubatch_id, task.is_target, None,
                          task.partition_id, 'update_model')
@@ -728,7 +767,7 @@ def copy_model(ctx: 'GpuTaskContext', task: 'GpuTask'):
             for param, new_param in zip(model.parameters(), parameters):
                 with torch.no_grad():
                     param.copy_(new_param, non_blocking=True)
-        src_stream.synchronize()
+        timed_stream_synchronize(src_stream, ctx)
 
     if ctx.config['train']['save_model_every_iter'] > 0:
         if task.batch_id % ctx.config['train']['save_model_every_iter'] == 0 and task.is_target:
@@ -742,10 +781,8 @@ def copy_model(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
     if task.is_target:
         ctx.device_state.current_target_model_id = model_batch_id
-        # print(f"current_target_model_id is now {model_batch_id}")
     else:
         ctx.device_state.current_online_model_id = model_batch_id
-        # print(f"current_online_model_id is now {model_batch_id}")
     if parameters is not None:
         profile_semantic(task.batch_id, task.view_id, task.ubatch_id, task.is_target, None, task.partition_id,
                          'update_model_finish')

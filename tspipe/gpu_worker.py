@@ -1,5 +1,5 @@
 """GPU Worker"""
-from collections import deque
+from collections import deque, defaultdict
 from copy import deepcopy
 from queue import Empty
 from queue import Queue as LocalQueue
@@ -12,6 +12,7 @@ import torch
 from torch.futures import Future
 import threading
 import traceback
+import os
 
 
 import tspipe.multiprocessing as mp
@@ -151,7 +152,13 @@ class SubGpuWorker():
             if debug_print_condition(task):
                 self.log__(f"Starting {task}")
             ctx: GpuTaskContext = self.base_worker.list_context[task.ubatch_id]
+
+            task_start = time()
             task.run(ctx)
+            task_elapsed_ms = (time() - task_start) * 1000.0
+
+            if hasattr(self.base_worker, "update_task_baseline"):
+                self.base_worker.update_task_baseline(task, task_elapsed_ms)
             if debug_print_condition(task):
                 self.log__(f"Finished {task}")
             task.completed = True
@@ -382,7 +389,22 @@ class GpuWorker(BaseWorker):
         self.health_thread: Optional[threading.Thread] = None
         self.health_check_enabled = True
         self.optimizer_pg_param_map: Optional[Dict[int, List[int]]] = None
+        # Worker-side slowdown injection config
+        self.slowdown_gpu: Optional[int] = None
+        self.slowdown_factor: Optional[float] = None
+        self.slowdown_start: Optional[int] = None
+        self.slowdown_end: Optional[int] = None
+        self.slowdown_task_scope: str = "compute"
 
+        # Per-task baseline runtime (ms), learned outside slowdown window
+        self._task_baseline_ms: Dict[str, float] = {}
+        self._task_baseline_count: Dict[str, int] = defaultdict(int)
+
+        # Logging throttle
+        self._slowdown_inject_count: int = 0
+        self._slowdown_log_every: int = 20
+        self._slowdown_skip_log_every: int = 20
+        self._slowdown_skip_counts: Dict[str, int] = defaultdict(int)
         self.start()
 
     def schedule(self, gpu_task: 'GpuTask'):
@@ -418,6 +440,32 @@ class GpuWorker(BaseWorker):
         self.config: Dict = self.comm.recv(f'init_config_{rank}')
         self.extra_args: Dict = self.comm.recv(f'init_config_{rank}')
         self.optimizer_pg_param_map = self.comm.recv(f'init_config_{rank}')
+        # Worker-side slowdown config (from train_kd CLI args)
+        def _opt(obj, key, default=None):
+            if obj is None:
+                return default
+            if isinstance(obj, dict):
+                return obj.get(key, default)
+            return getattr(obj, key, default)
+
+        # user CLI args are carried in extra_args
+        arg_src = self.extra_args if self.extra_args is not None else self.args
+
+        self.slowdown_gpu = _opt(arg_src, "inject_slowdown_gpu", None)
+        self.slowdown_factor = _opt(arg_src, "slowdown_factor", None)
+        self.slowdown_start = _opt(arg_src, "slowdown_start", None)
+        self.slowdown_end = _opt(arg_src, "slowdown_end", None)
+        self.slowdown_task_scope = _opt(arg_src, "slowdown_task_scope", "compute")
+        if self.slowdown_task_scope is None:
+            self.slowdown_task_scope = "compute"
+        self.slowdown_task_scope = str(self.slowdown_task_scope).strip().lower()
+
+        Log.i(
+            f"[SlowdownConfig] partition={self.partition_id}, "
+            f"device_id={self.device_id}, target_gpu={self.slowdown_gpu}, "
+            f"factor={self.slowdown_factor}, range=({self.slowdown_start}, {self.slowdown_end}), "
+            f"scope={self.slowdown_task_scope}, arg_src={type(arg_src).__name__}"
+        )       
         Log.d("Received args, args = ", self.args)
         Log.d("Received config, args = ", self.config)
 
@@ -715,7 +763,176 @@ class GpuWorker(BaseWorker):
             'process_alive': self.process.is_alive() if hasattr(self, 'process') else False,
             'health_check_enabled': self.health_check_enabled
         }
+    def _task_scope_of(self, task: 'GpuTask') -> Optional[str]:
+        if task.task_type in {
+            TaskType.TASK_COMPUTE_FORWARD,
+            TaskType.TASK_COMPUTE_BACKWARD,
+            TaskType.TASK_COMPUTE_LOSS,
+            TaskType.TASK_COMPUTE_OPTIMIZE_GPU,
+        }:
+            return "compute"
 
+        if task.task_type in {
+            TaskType.TASK_COPY_BATCH,
+            TaskType.TASK_COPY_BATCH_OUT,
+            TaskType.TASK_COPY_GRAD,
+            TaskType.TASK_COPY_GRAD_OUT,
+            TaskType.TASK_COPY_MODEL,
+        }:
+            return "comm"
+
+        return None
+
+    def _task_baseline_key(self, task: 'GpuTask') -> Optional[str]:
+        scope = self._task_scope_of(task)
+        if scope is None:
+            return None
+        return f"{scope}:{task.task_type.name}"
+
+    def _scope_enabled_for_task(self, task: 'GpuTask') -> bool:
+        scope = self._task_scope_of(task)
+        if scope is None:
+            return False
+
+        if self.slowdown_task_scope == "both":
+            return True
+        if self.slowdown_task_scope == "compute" and scope == "compute":
+            return True
+        if self.slowdown_task_scope == "comm" and scope == "comm":
+            return True
+        return False
+
+    def _is_target_slowdown_gpu(self) -> bool:
+        if self.slowdown_gpu is None:
+            return True
+        if self.device_id is None:
+            return False
+        return int(self.device_id) == int(self.slowdown_gpu)
+
+    def _is_in_slowdown_window(self, task: 'GpuTask') -> bool:
+        if self.slowdown_start is None or self.slowdown_end is None:
+            return False
+
+        # train_kd.py 쪽 niter semantics와 맞추기 위해 batch_id-1 기준으로 비교
+        step_like = max(0, int(task.batch_id) - 1)
+        return int(self.slowdown_start) <= step_like < int(self.slowdown_end)
+
+    def _log_slowdown_skip(self, task: 'GpuTask', reason: str, extra: Optional[str] = None):
+        key = self._task_baseline_key(task) or "unknown"
+        scope = self._task_scope_of(task)
+        step_like = max(0, int(task.batch_id) - 1)
+        counter_key = f"{reason}:{key}"
+        self._slowdown_skip_counts[counter_key] += 1
+        if self._slowdown_skip_counts[counter_key] % self._slowdown_skip_log_every != 0:
+            return
+
+        suffix = f", {extra}" if extra else ""
+        Log.i(
+            f"🛑 [WorkerSlowdownSkip] partition={self.partition_id}, device_id={self.device_id}, "
+            f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, step={step_like}, "
+            f"reason={reason}{suffix}"
+        )
+
+    def should_inject_task_slowdown(self, task: 'GpuTask') -> bool:
+        if self.slowdown_factor is None:
+            self._log_slowdown_skip(task, "missing_factor")
+            return False
+        if float(self.slowdown_factor) <= 1.0:
+            self._log_slowdown_skip(task, "non_positive_factor", f"factor={self.slowdown_factor}")
+            return False
+        if not self._is_target_slowdown_gpu():
+            self._log_slowdown_skip(
+                task,
+                "gpu_mismatch",
+                f"target_gpu={self.slowdown_gpu}"
+            )
+            return False
+        if not self._scope_enabled_for_task(task):
+            self._log_slowdown_skip(
+                task,
+                "scope_mismatch",
+                f"configured_scope={self.slowdown_task_scope}"
+            )
+            return False
+        if not self._is_in_slowdown_window(task):
+            self._log_slowdown_skip(
+                task,
+                "outside_window",
+                f"range=({self.slowdown_start}, {self.slowdown_end})"
+            )
+            return False
+        return True
+
+    def get_task_injected_sleep_sec(self, task: 'GpuTask') -> float:
+        if not self.should_inject_task_slowdown(task):
+            return 0.0
+
+        key = self._task_baseline_key(task)
+        if key is None:
+            self._log_slowdown_skip(task, "missing_baseline_key")
+            return 0.0
+
+        base_ms = self._task_baseline_ms.get(key)
+        if base_ms is None or base_ms <= 0:
+            baseline_count = int(self._task_baseline_count.get(key, 0))
+            self._log_slowdown_skip(
+                task,
+                "missing_baseline",
+                f"baseline_key={key}, baseline_ms={base_ms}, baseline_count={baseline_count}"
+            )
+            return 0.0
+
+        factor = float(self.slowdown_factor)
+        extra_ms = max(base_ms * (factor - 1.0), 0.0)
+        if extra_ms <= 0:
+            self._log_slowdown_skip(
+                task,
+                "zero_extra_sleep",
+                f"baseline_key={key}, baseline_ms={base_ms:.2f}, factor={factor:.2f}"
+            )
+            return 0.0
+        return extra_ms / 1000.0
+
+    def update_task_baseline(self, task: 'GpuTask', elapsed_ms: float):
+        key = self._task_baseline_key(task)
+        if key is None:
+            return
+        if elapsed_ms <= 0:
+            return
+
+        # 주입 구간 값으로 baseline 오염 방지
+        if self._is_target_slowdown_gpu() and self._is_in_slowdown_window(task):
+            return
+
+        prev = self._task_baseline_ms.get(key)
+        if prev is None:
+            self._task_baseline_ms[key] = float(elapsed_ms)
+        else:
+            self._task_baseline_ms[key] = 0.9 * prev + 0.1 * float(elapsed_ms)
+
+        self._task_baseline_count[key] += 1
+        if self._is_target_slowdown_gpu() and self._task_baseline_count[key] in {1, 5, 20}:
+            Log.i(
+                f"📏 [WorkerSlowdownBaseline] partition={self.partition_id}, device_id={self.device_id}, "
+                f"key={key}, count={self._task_baseline_count[key]}, "
+                f"baseline_ms={self._task_baseline_ms[key]:.2f}"
+            )
+
+    def log_task_slowdown_injection(self, task: 'GpuTask', sleep_sec: float):
+        self._slowdown_inject_count += 1
+        if self._slowdown_inject_count % self._slowdown_log_every != 0:
+            return
+
+        scope = self._task_scope_of(task)
+        key = self._task_baseline_key(task)
+        baseline_ms = self._task_baseline_ms.get(key, -1.0) if key else -1.0
+
+        Log.i(
+            f"🧪 [WorkerSlowdown] partition={self.partition_id}, device_id={self.device_id}, "
+            f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
+            f"baseline_ms={baseline_ms:.2f}, factor={self.slowdown_factor}, "
+            f"sleep_ms={sleep_sec * 1000.0:.2f}"
+        )
     def join(self):
         # 헬스체크 중지
         self.stop_health_check()

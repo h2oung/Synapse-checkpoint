@@ -29,8 +29,8 @@ class DynamicAlphaBetaEstimator:
         compute_ratio: Optional[float] = None,
         comm_ratio: Optional[float] = None,
         ema: float = 0.2,
-        min_ratio: float = 0.5,
-        max_ratio: float = 3.0,
+        min_ratio: float = 0.8,
+        max_ratio: float = 10.0,
     ) -> AlphaBetaEstimate:
         """
         Update alpha/beta with measured ratios.

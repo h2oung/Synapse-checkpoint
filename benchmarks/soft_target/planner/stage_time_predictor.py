@@ -208,15 +208,21 @@ class StageTimePredictor:
                                     healthy_gpus: List[int],
                                     alpha_g: Dict[int, float],
                                     beta_g: Dict[int, float]) -> float:
-        """DEGRADE 정책: 장애 GPU 제외 후 재-profiling 가정 → 건강한 GPU α=β=1.0으로 초기화"""
+        """DEGRADE 정책: 느린 GPU를 제외한 나머지 GPU로 동일한 runtime 계수 하에 재분할"""
         if not healthy_gpus:
             return float('inf')
 
-        # DEGRADE는 남은 GPU에 대한 재-profiling을 수행하므로
-        # 해당 GPU들은 baseline 상태(α=β=1.0)로 stage time을 계산
-        clean_alpha = {int(gpu_id): 1.0 for gpu_id in healthy_gpus}
-        clean_beta = {int(gpu_id): 1.0 for gpu_id in healthy_gpus}
-        return self._calculate_replan_stage_time(healthy_gpus, clean_alpha, clean_beta)
+        # REPLAN과 동일한 runtime alpha/beta 가정으로 비교하되,
+        # 느린 GPU만 제외한 GPU 집합으로만 최적 재분할을 계산한다.
+        degrade_alpha = {
+            int(gpu_id): float(alpha_g.get(int(gpu_id), 1.0))
+            for gpu_id in healthy_gpus
+        }
+        degrade_beta = {
+            int(gpu_id): float(beta_g.get(int(gpu_id), 1.0))
+            for gpu_id in healthy_gpus
+        }
+        return self._calculate_replan_stage_time(healthy_gpus, degrade_alpha, degrade_beta)
 
     def solve_optimal_partition(
         self,

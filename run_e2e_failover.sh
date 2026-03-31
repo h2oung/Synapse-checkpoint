@@ -18,7 +18,7 @@ LEGACY_RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
 E2E_MASTER_IP="${E2E_MASTER_IP:-127.0.0.1}"
 
 # Default GPU set for initial boot (before any restart config exists).
-DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-2,3,4,5}"
+DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-2,3,5,6}"
 
 # Optional restart limit to avoid infinite loops during debugging.
 MAX_RESTARTS="${MAX_RESTARTS:-0}"  # 0 means unlimited

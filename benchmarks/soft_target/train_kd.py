@@ -95,6 +95,9 @@ parser.add_argument('--slowdown-factor', type=float, default=None, help='Slowdow
 parser.add_argument('--slowdown-duration', type=int, default=None, help='Number of steps to inject slowdown (default: scenario-specific)')
 parser.add_argument('--slowdown-start', type=int, default=None, help='Start step for slowdown injection (default: scenario-specific)')
 parser.add_argument('--slowdown-end', type=int, default=None, help='End step for slowdown injection (default: scenario-specific)')
+parser.add_argument('--slowdown-task-scope', type=str, default='compute',
+                    choices=['compute', 'comm', 'both'],
+                    help='Inject slowdown inside worker task path: compute / comm / both')
 
 args, unparsed = parser.parse_known_args()
 
@@ -739,7 +742,7 @@ def main():
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
         
         # NEW: Initialize slowdown detection and failover policy components
-        slowdown_detector = SlowdownDetector(inject_scenario=args.failover_inject_scenario)
+        slowdown_detector = SlowdownDetector(inject_scenario=args.failover_inject_scenario, slowdown_threshold=1.10,)
         
         # ✅ Step 1: Pass YAML partition config to optimizer to sync initial state
         # This ensures failover decisions use the actual runtime partition from start
@@ -766,11 +769,19 @@ def main():
             # emergency_restart_config). The second bootstrap call deliberately
             # returns None for these fields when skip_checkpoint_restore=True.
             if bootstrap_alpha_comp is not None:
-                failover_optimizer.alpha_g = bootstrap_alpha_comp
+                failover_optimizer.alpha_g.clear()
+                failover_optimizer.alpha_g.update(bootstrap_alpha_comp)
+                if getattr(failover_optimizer, "alpha_beta_estimator", None) is not None:
+                    failover_optimizer.alpha_beta_estimator.alpha_g.clear()
+                    failover_optimizer.alpha_beta_estimator.alpha_g.update(bootstrap_alpha_comp)
                 logging.error(f"🔄 Restored alpha_g from checkpoint: {failover_optimizer.alpha_g}")
 
             if bootstrap_beta_comm is not None:
-                failover_optimizer.beta_g = bootstrap_beta_comm
+                failover_optimizer.beta_g.clear()
+                failover_optimizer.beta_g.update(bootstrap_beta_comm)
+                if getattr(failover_optimizer, "alpha_beta_estimator", None) is not None:
+                    failover_optimizer.alpha_beta_estimator.beta_g.clear()
+                    failover_optimizer.alpha_beta_estimator.beta_g.update(bootstrap_beta_comm)
                 logging.error(f"🔄 Restored beta_g from checkpoint: {failover_optimizer.beta_g}")
 
         def _save_failover_checkpoint(meta):
@@ -964,7 +975,11 @@ class RuntimeTimingIngestor:
                         gpu_id = int(record.get("device", -1))
                         if gpu_id < 0:
                             continue
-                        task_time_ms = float(record.get("time_ms", 0.0))
+
+                        raw_exec_ms = record.get("exec_wall_ms", None)
+                        if raw_exec_ms is None:
+                            raw_exec_ms = record.get("time_ms", 0.0)
+                        task_time_ms = float(raw_exec_ms or 0.0)
                         if task_time_ms <= 0:
                             continue
 
@@ -973,23 +988,28 @@ class RuntimeTimingIngestor:
                             self._append_hist(self._compute_hist, gpu_id, task_time_ms)
                         elif task_name.startswith("copy"):
                             self._append_hist(self._comm_hist, gpu_id, task_time_ms)
-                    self._offsets[key] = f.tell()
+
+                    self._offsets[key]=f.tell()
             except OSError:
                 continue
 
     def build_timing_payload(self):
         payload = {}
+        recent_n = 20
         all_gpu_ids = set(self._compute_hist.keys()) | set(self._comm_hist.keys())
+
         for gpu_id in all_gpu_ids:
-            c_hist = self._compute_hist.get(gpu_id, [])
-            m_hist = self._comm_hist.get(gpu_id, [])
+            c_hist = list(self._compute_hist.get(gpu_id, []))[-recent_n:]
+            m_hist = list(self._comm_hist.get(gpu_id, []))[-recent_n:]
             if not c_hist and not m_hist:
                 continue
-            compute_ms = (sum(c_hist) / len(c_hist)) if c_hist else 0.0
-            comm_ms = (sum(m_hist) / len(m_hist)) if m_hist else 0.0
+
+            compute_ms = float(np.median(c_hist)) if c_hist else 0.0
+            comm_ms = float(np.median(m_hist)) if m_hist else 0.0
+
             payload[gpu_id] = {
-                "compute_time": compute_ms/1000.0,
-                "comm_time": comm_ms/1000.0,
+                "compute_time": compute_ms / 1000.0,
+                "comm_time": comm_ms / 1000.0,
             }
         return payload
 
@@ -1093,94 +1113,32 @@ niter = 0
 def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterions, epoch, writer,
                  slowdown_detector=None, failover_optimizer=None, timing_ingestor=None,
                  max_steps_per_epoch: int = 0):
-    """TSPipe training with failover monitoring and policy decisions
-    
-    NEW: Integrated slowdown detection and dynamic policy selection
-    """
     global niter
 
-    global niter
-    # tqdm 진행바와 enumerate 시작 인덱스를 niter(복원 step)에 맞게 조정
     pbar = tqdm(train_loader, initial=niter)
-    for i, (img, target) in enumerate(pbar, start=niter+1):
+    wallclock_sustain_sec = float(os.environ.get("FAILOVER_SLOWDOWN_THRESHOLD_SEC", "10.0"))
+    trigger_threshold = 1.10
+
+    for i, (img, target) in enumerate(pbar, start=niter + 1):
         if i <= niter:
             continue
         if _should_skip_resume_batch(epoch):
             continue
 
-        # Record batch start time
         batch_start_time = time.time()
-        
         loss = tspipe_trainer.feed(img, img, target)
 
         if loss is None:
             continue
 
-        # Record batch wall-clock for SlowdownDetector fallback
-        batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
+        # 1) end-to-end wall-clock step time
+        batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000.0
 
-        # Generalized slowdown injection for failover experiments
-        slowdown_gpu = args.inject_slowdown_gpu
-        slowdown_factor = args.slowdown_factor
-        slowdown_duration = args.slowdown_duration
-        slowdown_start = args.slowdown_start
-        slowdown_end = args.slowdown_end
-
-        # Scenario-specific defaults
-        inject_scenario = getattr(args, "failover_inject_scenario", "") or os.environ.get(
-            "FAILOVER_INJECT_SCENARIO", ""
-        ).strip()
-        if inject_scenario == "KEEP_REPLAN_DEGRADE":
-            if slowdown_factor is None:
-                slowdown_factor = 1.05
-            if slowdown_start is None:
-                slowdown_start = 30
-            if slowdown_end is None:
-                slowdown_end = 80
-        elif inject_scenario == "REPLAN_SLOWDOWN":
-            if slowdown_factor is None:
-                slowdown_factor = 1.6
-            if slowdown_start is None:
-                slowdown_start = 60
-            total_steps = len(train_loader) * args.epochs
-            if slowdown_duration is not None:
-                slowdown_end = min(total_steps, slowdown_start + slowdown_duration)
-            elif slowdown_end is None:
-                slowdown_end = total_steps
-
-        # Only inject slowdown if scenario and GPU match
-        # (If slowdown_gpu is None, always inject; else only for matching rank)
-        should_inject = False
-        current_rank = getattr(tspipe_trainer, "rank", 0)
-        if slowdown_gpu is None or current_rank == slowdown_gpu:
-            if slowdown_factor is not None and slowdown_start is not None and slowdown_end is not None:
-                if slowdown_start <= niter < slowdown_end:
-                    should_inject = True
-
-        if should_inject:
-            baseline_ms = None
-            if slowdown_detector is not None and slowdown_detector.baseline_stage_time is not None:
-                baseline_ms = slowdown_detector.baseline_stage_time
-            else:
-                baseline_ms = batch_elapsed_time_ms
-
-            extra_ms = max(baseline_ms * (slowdown_factor - 1.0), 0.0)
-            extra_sec = extra_ms / 1000.0
-            if extra_sec > 0:
-                time.sleep(extra_sec)
-                # sleep까지 포함한 실제 wall-clock을 다시 측정해 기록
-                batch_elapsed_time_ms = (time.time() - batch_start_time) * 1000
-                logging.info(
-                    f"🧪 REAL slowdown injected (scenario={inject_scenario}, "
-                    f"rank={current_rank}, gpu={slowdown_gpu}, "
-                    f"range={slowdown_start}-{slowdown_end}, target≈{slowdown_factor:.2f}x, step={niter}, "
-                    f"elapsed={batch_elapsed_time_ms:.2f}ms)"
-                )
-
+        # 2) progress update
         if failover_optimizer is not None:
-            # Keep progress tracker up to date every step for K_rem and phase transitions.
             failover_optimizer.update_training_progress(niter, epoch)
 
+        # 3) timing ingestion for localization only
         timing_payload = {}
         if failover_optimizer is not None and timing_ingestor is not None:
             timing_ingestor.update()
@@ -1188,61 +1146,112 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
             if timing_payload:
                 failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
 
-        # Always feed wall-clock into SlowdownDetector for baseline tracking
+        # 4) wall-clock trigger source
+        trigger_state = None
         if slowdown_detector is not None:
-            slowdown_detector.record_stage_time(batch_elapsed_time_ms)
-
-        # Periodic failover evaluation (every 10 steps)
-        if failover_optimizer is not None and niter % 10 == 0:
-            # Prefer timing-based alpha_g (current/baseline ratio per GPU) over wall-clock.
-            # alpha_g is updated by ingest_runtime_timing_batch above via EMA.
-            # ✅ FIX: Consider both alpha (compute) and beta (communication) slowdown
-            # ✅ FIX: Gate on phase-0 to allow wall-clock fallback during baseline collection
-            use_timing_based = (
-                timing_payload
-                and failover_optimizer.alpha_g
-                and not failover_optimizer._is_phase0_baseline_active()
-            )
-            
-            if use_timing_based:
-                slow_gpu_id = failover_optimizer.identify_slow_gpu()
-                # ✅ Extract slowdown ratio for the identified slow GPU, not system-wide max
-                # Ensures consistent (GPU id, slowdown ratio) pairing in logs
-                slowdown_ratio = max(
-                    failover_optimizer.alpha_g.get(slow_gpu_id, 1.0),
-                    failover_optimizer.beta_g.get(slow_gpu_id, 1.0),
+            try:
+                slowdown_detector.record_stage_time(
+                    batch_elapsed_time_ms,
+                    timestamp_sec=time.time(),
                 )
-            elif slowdown_detector is not None:
-                slowdown_ratio = slowdown_detector.get_slowdown_ratio()
-                slow_gpu_id = 0
+            except TypeError:
+                slowdown_detector.record_stage_time(batch_elapsed_time_ms)
+
+            if hasattr(slowdown_detector, "get_trigger_state"):
+                trigger_state = slowdown_detector.get_trigger_state(
+                    sustain_sec=wallclock_sustain_sec
+                )
             else:
-                slowdown_ratio = 1.0
-                slow_gpu_id = 0
+                wall_ratio_fallback = slowdown_detector.get_slowdown_ratio()
+                wall_sustained_fallback = float(
+                    getattr(slowdown_detector, "wallclock_sustained_duration_sec", 0.0)
+                )
+                if hasattr(slowdown_detector, "wallclock_sustained_duration_sec"):
+                    wall_triggered_fallback = (
+                        wall_ratio_fallback > trigger_threshold
+                        and wall_sustained_fallback >= wallclock_sustain_sec
+                    )
+                else:
+                    wall_triggered_fallback = (wall_ratio_fallback > trigger_threshold)
 
-            _SLOWDOWN_TRIGGER = 1.10  # 스펙 4절 1단계 임계값
-            if slowdown_ratio > _SLOWDOWN_TRIGGER:
+                trigger_state = {
+                    "current_slowdown_ratio": wall_ratio_fallback,
+                    "sustained_duration_sec": wall_sustained_fallback,
+                    "triggered": wall_triggered_fallback,
+                }
+
+        # 5) periodic failover evaluation
+        if failover_optimizer is not None and slowdown_detector is not None and niter % 10 == 0:
+            wall_ratio = float(trigger_state["current_slowdown_ratio"]) if trigger_state else 1.0
+            wall_sustained = float(trigger_state["sustained_duration_sec"]) if trigger_state else 0.0
+            wall_triggered = bool(trigger_state["triggered"]) if trigger_state else False
+
+            if wall_triggered:
+                preferred_gpu = None
+                if args.inject_slowdown_gpu is not None and args.slowdown_factor is not None:
+                    preferred_gpu = int(args.inject_slowdown_gpu)
+
+                try:
+                    localized_gpu = failover_optimizer.identify_slow_gpu(
+                        preferred_gpu=preferred_gpu
+                    )
+                except TypeError:
+                    localized_gpu = failover_optimizer.identify_slow_gpu()
+
+                if hasattr(failover_optimizer, "get_gpu_slowdown"):
+                    localized_ratio = failover_optimizer.get_gpu_slowdown(localized_gpu)
+                else:
+                    localized_ratio = max(
+                        failover_optimizer.alpha_g.get(localized_gpu, 1.0),
+                        failover_optimizer.beta_g.get(localized_gpu, 1.0),
+                    )
+
+                effective_slowdown = max(wall_ratio, localized_ratio, trigger_threshold)
+
                 logging.info(
-                    f"⚠️ Slowdown detected: {slowdown_ratio:.2f}x "
-                    f"(GPU {slow_gpu_id}) at step {niter}"
+                    f"⚠️ Wall-clock trigger confirmed at step {niter}: "
+                    f"wall_ratio={wall_ratio:.2f}x, sustained={wall_sustained:.1f}s, "
+                    f"localized_gpu={localized_gpu}, localized_ratio={localized_ratio:.2f}x, "
+                    f"effective={effective_slowdown:.2f}x"
                 )
-                policy = failover_optimizer.evaluate_slowdown_and_decide(
-                    gpu_id=slow_gpu_id,
-                    current_slowdown=slowdown_ratio,
-                )
+
+                try:
+                    policy = failover_optimizer.evaluate_slowdown_and_decide(
+                        gpu_id=localized_gpu,
+                        current_slowdown=effective_slowdown,
+                        trigger_confirmed=True,
+                    )
+                except TypeError:
+                    policy = failover_optimizer.evaluate_slowdown_and_decide(
+                        gpu_id=localized_gpu,
+                        current_slowdown=effective_slowdown,
+                    )
+
                 logging.info(
                     f"🎯 Failover Policy Decision: {policy} "
-                    f"(step={niter}, slowdown={slowdown_ratio:.2f}x, gpu={slow_gpu_id})"
+                    f"(step={niter}, gpu={localized_gpu}, "
+                    f"wall_ratio={wall_ratio:.2f}x, localized_ratio={localized_ratio:.2f}x)"
                 )
-                failover_optimizer.execute_policy(
-                    policy, gpu_id=slow_gpu_id, current_slowdown=slowdown_ratio
-                )
+
+                if policy != "KEEP":
+                    failover_optimizer.execute_policy(
+                        policy,
+                        gpu_id=localized_gpu,
+                        current_slowdown=effective_slowdown,
+                    )
+            else:
+                if wall_ratio > 1.05:
+                    logging.info(
+                        f"⏳ Wall-clock slowdown pending: "
+                        f"ratio={wall_ratio:.2f}x, sustained={wall_sustained:.1f}s/"
+                        f"{wallclock_sustain_sec:.1f}s, step={niter}"
+                    )
 
         writer.add_scalar('loss', loss, global_step=niter)
         pbar.set_postfix({'loss': loss, 'batch_id': niter})
 
         niter += 1
 
-        # 한 epoch당 step 수를 제한해서 e2e 실험을 빠르게 종료
         if max_steps_per_epoch > 0 and i >= max_steps_per_epoch:
             break
 

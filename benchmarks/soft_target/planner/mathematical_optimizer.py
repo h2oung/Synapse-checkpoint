@@ -96,7 +96,11 @@ class MathematicalFailoverOptimizer:
         self.sustained_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
         self.replan_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
         self.degrade_time = {gpu_id: 0 for gpu_id in self.alpha_g.keys()}
-        
+                # Sticky suspect GPU selection for localization stability
+        self._suspect_gpu_id: Optional[int] = None
+        self._suspect_switch_counter: int = 0
+        self._suspect_hold_evals: int = int(os.environ.get("FAILOVER_SUSPECT_HOLD_EVALS", "3"))
+        self._suspect_switch_margin: float = float(os.environ.get("FAILOVER_SUSPECT_SWITCH_MARGIN", "0.10"))
         # ✅ Step 1: Current partition tracking - use provided YAML config or fallback to default
         # This ensures optimizer knows the actual runtime partition from day 1
         if initial_partition_config is not None:
@@ -169,19 +173,29 @@ class MathematicalFailoverOptimizer:
             step_id = int(self.progress_tracker.progress.current_step)
             t_base = float(self.policy_selector.eta_calculator.restart_costs.T_base)
 
+        active_gpus = [int(g) for g in self.current_partition.gpu_assignment]
+        alpha_to_save = {
+            int(gpu_id): float(self.alpha_g.get(int(gpu_id), 1.0))
+            for gpu_id in active_gpus
+        }
+        beta_to_save = {
+            int(gpu_id): float(self.beta_g.get(int(gpu_id), 1.0))
+            for gpu_id in active_gpus
+        }
+
         payload: Dict[str, Any] = {
             "timestamp": time.time(),
             "trigger_policy": str(policy),
             "step_id": step_id,
             "partition": {
-                "gpu_assignment": [int(g) for g in self.current_partition.gpu_assignment],
+                "gpu_assignment": active_gpus,
                 "snet_partition": [int(v) for v in self.current_partition.snet_partition],
                 "tnet_partition": [int(v) for v in self.current_partition.tnet_partition],
                 "snet_stage_boundaries": self._partition_boundaries(self.current_partition.snet_partition),
                 "tnet_stage_boundaries": self._partition_boundaries(self.current_partition.tnet_partition),
             },
-            "alpha_comp": {int(k): float(v) for k, v in self.alpha_g.items()},
-            "beta_comm": {int(k): float(v) for k, v in self.beta_g.items()},
+            "alpha_comp": alpha_to_save,
+            "beta_comm": beta_to_save,
             "restart_overhead": {
                 "formula": "4.37 + 50 * T_base",
                 "t_base": t_base,
@@ -518,7 +532,8 @@ class MathematicalFailoverOptimizer:
     def evaluate_slowdown_and_decide(self, 
                                    gpu_id: int, 
                                    current_slowdown: float,
-                                   failed_gpus: Optional[List[int]] = None) -> str:
+                                   failed_gpus: Optional[List[int]] = None,
+                                   trigger_confirmed: bool = False,) -> str:
         """
         성능 저하 감지 시 최적 정책 결정
         
@@ -531,14 +546,15 @@ class MathematicalFailoverOptimizer:
             str: 추천 정책 ("KEEP", "REPLAN", "DEGRADE")
         """
         if self.use_mathematical_model:
-            return self._decide_with_mathematical_model(gpu_id, current_slowdown, failed_gpus)
+            return self._decide_with_mathematical_model(gpu_id, current_slowdown, failed_gpus, trigger_confirmed=trigger_confirmed,)
         else:
             return self._decide_with_legacy_logic(gpu_id, current_slowdown)
     
     def _decide_with_mathematical_model(self, 
                                       gpu_id: int, 
                                       current_slowdown: float,
-                                      failed_gpus: Optional[List[int]] = None) -> str:
+                                      failed_gpus: Optional[List[int]] = None,
+                                      trigger_confirmed: bool = False,) -> str:
         """수학적 모델 기반 결정"""
         self._try_freeze_phase0_baseline()
         if self._is_phase0_baseline_active():
@@ -552,7 +568,8 @@ class MathematicalFailoverOptimizer:
                 gpu_id, 
                 current_slowdown, 
                 self.current_partition,
-                failed_gpus
+                failed_gpus,
+                trigger_confirmed=trigger_confirmed,
             )
             
             policy_name = decision.recommended_policy.value.upper()
@@ -656,29 +673,83 @@ class MathematicalFailoverOptimizer:
         """KEEP 정책 실행 (아무것도 하지 않음)"""
         self.logger.info(f"✅ Executing KEEP for GPU {gpu_id} (slowdown: {slowdown:.2f}) - No action needed")
     
-    def identify_slow_gpu(self) -> int:
-        """Identify GPU with highest alpha or beta coefficient (slowest GPU)
-        
-        Returns:
-            int: GPU ID with maximum slowdown coefficient
+    def get_gpu_slowdown(self, gpu_id: int) -> float:
+        return max(
+            float(self.alpha_g.get(int(gpu_id), 1.0)),
+            float(self.beta_g.get(int(gpu_id), 1.0)),
+        )
+
+    def identify_slow_gpu(self, preferred_gpu: Optional[int] = None) -> int:
         """
-        if not self.alpha_g or not self.beta_g:
-            return 0  # Fallback to GPU 0 if no data
-        
-        max_slowdown = 1.0
-        slow_gpu_id = 0
-        
-        for gpu_id in self.alpha_g.keys():
-            alpha = self.alpha_g.get(gpu_id, 1.0)
-            beta = self.beta_g.get(gpu_id, 1.0)
-            slowdown = max(alpha, beta)
-            
-            if slowdown >= max_slowdown:
-                max_slowdown = slowdown
-                slow_gpu_id = gpu_id
-        
-        self.logger.info(f"🔍 Identified slow GPU: GPU {slow_gpu_id} with slowdown {max_slowdown:.3f}x")
-        return slow_gpu_id
+        Stable suspect-GPU localization.
+
+        - synthetic 실험이면 preferred_gpu를 우선 사용
+        - 그 외에는 sticky suspect + hysteresis로 순간 흔들림을 완화
+        """
+        candidate_gpu_ids = set(self.alpha_g.keys()) | set(self.beta_g.keys())
+        if self.current_partition is not None and self.current_partition.gpu_assignment:
+            active = set(int(g) for g in self.current_partition.gpu_assignment)
+            candidate_gpu_ids &= active
+
+        if not candidate_gpu_ids:
+            return 0
+
+        slowdown_by_gpu = {
+            int(gpu_id): self.get_gpu_slowdown(int(gpu_id))
+            for gpu_id in sorted(candidate_gpu_ids)
+        }
+
+        # Synthetic experiment prior: keep the injected GPU as suspect.
+        if preferred_gpu is not None and int(preferred_gpu) in slowdown_by_gpu:
+            chosen = int(preferred_gpu)
+            self._suspect_gpu_id = chosen
+            self._suspect_switch_counter = 0
+            self.logger.info(
+                f"🔍 Identified slow GPU (preferred prior): GPU {chosen} "
+                f"with slowdown {slowdown_by_gpu[chosen]:.3f}x"
+            )
+            return chosen
+
+        best_gpu_id, best_slowdown = max(
+            slowdown_by_gpu.items(),
+            key=lambda kv: (kv[1], -kv[0]),
+        )
+
+        if self._suspect_gpu_id is None or self._suspect_gpu_id not in slowdown_by_gpu:
+            self._suspect_gpu_id = best_gpu_id
+            self._suspect_switch_counter = 0
+            self.logger.info(
+                f"🔍 Identified slow GPU (initial): GPU {best_gpu_id} "
+                f"with slowdown {best_slowdown:.3f}x"
+            )
+            return best_gpu_id
+
+        current_suspect = int(self._suspect_gpu_id)
+        current_suspect_slowdown = slowdown_by_gpu[current_suspect]
+
+        # If challenger is not clearly better, keep current suspect.
+        if (
+            best_gpu_id == current_suspect
+            or best_slowdown <= current_suspect_slowdown + self._suspect_switch_margin
+        ):
+            self._suspect_switch_counter = 0
+            chosen = current_suspect
+        else:
+            self._suspect_switch_counter += 1
+            if self._suspect_switch_counter >= self._suspect_hold_evals:
+                self._suspect_gpu_id = best_gpu_id
+                self._suspect_switch_counter = 0
+                chosen = best_gpu_id
+            else:
+                chosen = current_suspect
+
+        self.logger.info(
+            f"🔍 Identified slow GPU: GPU {chosen} "
+            f"(best={best_gpu_id}:{best_slowdown:.3f}x, "
+            f"suspect={self._suspect_gpu_id}, "
+            f"hold_counter={self._suspect_switch_counter})"
+        )
+        return chosen
     
     def _run_realtime_dp_repartition(self, gpu_assignment: List[int], policy_name: str) -> Optional[PartitionConfig]:
         """Run minimax contiguous DP now using the latest monitored alpha/beta."""

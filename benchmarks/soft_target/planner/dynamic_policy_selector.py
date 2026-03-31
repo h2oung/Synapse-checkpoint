@@ -72,52 +72,64 @@ class DynamicPolicySelector:
         
         self.logger.info("🧠 DynamicPolicySelector initialized with mathematical model")
     
-    def evaluate_slowdown(self, 
-                         gpu_id: int, 
-                         current_slowdown: float,
-                         current_partition: PartitionConfig,
-                         failed_gpus: Optional[List[int]] = None) -> FailoverDecision:
+    def evaluate_slowdown(
+        self,
+        gpu_id: int,
+        current_slowdown: float,
+        current_partition: PartitionConfig,
+        failed_gpus: Optional[List[int]] = None,
+        trigger_confirmed: bool = False,
+    ) -> FailoverDecision:
         """
         GPU 성능 저하 감지 시 최적 정책 결정
-        
-        Args:
-            gpu_id: 성능 저하가 감지된 GPU ID
-            current_slowdown: 현재 slowdown 비율 (1.0 = 정상, >1.0 = 느림)
-            current_partition: 현재 파이프라인 분할 구성 
-            failed_gpus: 완전히 장애가 발생한 GPU 목록
-            
-        Returns:
-            FailoverDecision: 추천 정책과 상세 분석 결과
+
+        trigger_confirmed=False:
+            기존처럼 내부 sustained gate 적용
+        trigger_confirmed=True:
+            upstream(train_kd.py)에서 wall-clock sustained trigger가 이미 확인된 상태
+            -> 여기서는 localization/policy만 수행
         """
         failed_gpus = failed_gpus or []
         current_time = time.time()
-        
-        # 1. Slowdown 이벤트 추적
-        self._update_slowdown_event(gpu_id, current_slowdown, current_time)
-        
-        # 2. 기본 조건 확인
-        if not self.decision_context.should_consider_failover():
-            return self._create_keep_decision("Failover conditions not met")
-            
-        if current_slowdown < self.min_slowdown_threshold:
-            return self._create_keep_decision(f"Slowdown {current_slowdown:.2f} below threshold")
 
-        # Ignore short transient slowdown spikes.
-        event = self.slowdown_events.get(gpu_id)
-        if event is not None and event.sustained_duration < self.sustained_slowdown_duration:
-            return self._create_keep_decision(
-                f"Slowdown not sustained long enough ({event.sustained_duration:.1f}s < {self.sustained_slowdown_duration:.1f}s)"
+        if not trigger_confirmed:
+            # 1. 기존 per-GPU sustained logic
+            self._update_slowdown_event(gpu_id, current_slowdown, current_time)
+
+            if not self.decision_context.should_consider_failover():
+                return self._create_keep_decision("Failover conditions not met")
+
+            if current_slowdown < self.min_slowdown_threshold:
+                return self._create_keep_decision(
+                    f"Slowdown {current_slowdown:.2f} below threshold"
+                )
+
+            event = self.slowdown_events.get(gpu_id)
+            if event is not None and event.sustained_duration < self.sustained_slowdown_duration:
+                return self._create_keep_decision(
+                    f"Slowdown not sustained long enough "
+                    f"({event.sustained_duration:.1f}s < {self.sustained_slowdown_duration:.1f}s)"
+                )
+        else:
+            # 1. upstream wall-clock trigger confirmed
+            if not self.decision_context.should_consider_failover():
+                return self._create_keep_decision("Failover conditions not met")
+
+            self.logger.info(
+                f"✅ Upstream wall-clock trigger confirmed. "
+                f"Bypassing per-GPU sustained gate for GPU{gpu_id} "
+                f"(slowdown={current_slowdown:.2f}x)"
             )
-        
-        # 3. GPU 상태 구성
+
+        # 2. GPU 상태 구성
         gpu_states = self._build_gpu_states(current_slowdown, gpu_id, failed_gpus)
-        
-        # 4. Stage time 예측
+
+        # 3. Stage time 예측
         stage_times = self.stage_time_predictor.predict_stage_times(
             gpu_states, current_partition, self.alpha_g, self.beta_g
         )
-        
-        # 5. ETA 계산 및 최적 정책 선택 (ETA 계산 오버헤드 측정)
+
+        # 4. ETA 계산
         eta_start = time.perf_counter()
         K_rem = self.progress_tracker.get_remaining_steps()
         eta_result = self.eta_calculator.calculate_eta(K_rem, stage_times, current_slowdown)
@@ -125,23 +137,17 @@ class DynamicPolicySelector:
         self.last_eta_compute_ms = (eta_end - eta_start) * 1000.0
         self.logger.info(f"⏱ ETA computation overhead: {self.last_eta_compute_ms:.3f} ms")
 
-        # If any GPU is hard-failed, prefer DEGRADE on ETA tie (or better)
-        # because DEGRADE is the semantically correct failover action.
+        # 5. Hard failure tie-break
         if failed_gpus:
-            eta_replan = eta_result.eta_values.get(Policy.REPLAN, float('inf'))
-            eta_degrade = eta_result.eta_values.get(Policy.DEGRADE, float('inf'))
+            eta_replan = eta_result.eta_values.get(Policy.REPLAN, float("inf"))
+            eta_degrade = eta_result.eta_values.get(Policy.DEGRADE, float("inf"))
             if eta_degrade <= eta_replan:
                 eta_result.optimal_policy = Policy.DEGRADE
-        
-        # 6. 결정 분석 및 검증
+
+        # 6. 결정 분석 및 기록
         decision = self._analyze_and_validate_decision(eta_result, K_rem, current_slowdown)
-        
-        # 7. 결정 기록
         self.decision_history.append(decision)
-        
-        # 8. 로깅
         self._log_decision(decision, gpu_id, current_slowdown, K_rem)
-        
         return decision
     
     def _update_slowdown_event(self, gpu_id: int, slowdown: float, current_time: float):
