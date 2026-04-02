@@ -12,7 +12,7 @@ def _feed_baseline(optimizer: MathematicalFailoverOptimizer, steps: int, gpus: l
     for step in range(steps):
         optimizer.update_training_progress(step_id=step, epoch=0)
         batch = {gpu: {"compute_time": 0.10, "comm_time": 0.02} for gpu in gpus}
-        optimizer.ingest_runtime_timing_batch(batch, ema=0.2)
+        optimizer.ingest_runtime_timing_batch(batch, ema=0.4)
 
 
 def run_regression_scenario() -> None:

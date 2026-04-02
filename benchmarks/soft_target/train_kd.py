@@ -11,7 +11,7 @@ import sys
 import time
 import yaml
 from functools import partial
-from itertools import chain
+from itertools import chain, islice
 from pathlib import Path
 from typing import Iterable, Optional
 
@@ -142,6 +142,54 @@ def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
             return value
     logging.error(f"🔍 Failed to extract {name} from unparsed_args: {unparsed_args}")
     return None
+
+
+def _latest_failover_coeff_path(save_root: str) -> str:
+    return os.path.join(save_root, "alpha_beta_latest.json")
+
+
+def _write_json_atomic(path: str, payload: dict):
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, path)
+
+
+def _persist_latest_failover_coefficients(
+    save_root: str,
+    alpha_comp,
+    beta_comm,
+    partition: Optional[PartitionConfig] = None,
+    source: str = "runtime",
+    step_id: Optional[int] = None,
+):
+    """Persist the latest learned alpha/beta so hard-failure restart can reuse them."""
+    if not isinstance(alpha_comp, dict) or not isinstance(beta_comm, dict):
+        return
+
+    try:
+        os.makedirs(save_root, exist_ok=True)
+        payload = {
+            "timestamp": time.time(),
+            "source": str(source),
+            "step_id": None if step_id is None else int(step_id),
+            "alpha_comp": {int(k): float(v) for k, v in alpha_comp.items()},
+            "beta_comm": {int(k): float(v) for k, v in beta_comm.items()},
+        }
+
+        if partition is not None:
+            if isinstance(partition, PartitionConfig):
+                payload["partition"] = {
+                    "gpu_assignment": [int(v) for v in partition.gpu_assignment],
+                    "snet_partition": [int(v) for v in partition.snet_partition],
+                    "tnet_partition": [int(v) for v in partition.tnet_partition],
+                }
+            elif isinstance(partition, dict):
+                payload["partition"] = partition
+
+        _write_json_atomic(_latest_failover_coeff_path(save_root), payload)
+    except Exception as e:
+        logging.warning(f"⚠️ Failed to persist latest alpha/beta snapshot: {e}")
 
 
 def _apply_restart_partition_to_tspipe_yaml(unparsed_args, restart_payload: dict):
@@ -332,11 +380,23 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
                 tnet_partition=partition["tnet_partition"],
                 gpu_assignment=partition.get("gpu_assignment", list(range(len(partition["snet_partition"])))),
             )
+        resume_epoch = restart_payload.get("epoch_id")
+        if resume_epoch is None:
+            resume_epoch = (resume_step // max(1, steps_per_epoch)) + 1
+        else:
+            resume_epoch = int(resume_epoch)
+
+        resume_batch_offset = restart_payload.get("batch_offset")
+        if resume_batch_offset is None:
+            resume_batch_offset = resume_step % max(1, steps_per_epoch)
+        else:
+            resume_batch_offset = int(resume_batch_offset)
+
         return {
             "enabled": True,
             "resume_step": resume_step,
-            "resume_epoch": int(restart_payload.get("epoch_id", 1)),
-            "resume_batch_offset": int(restart_payload.get("batch_offset", 0)),
+            "resume_epoch": resume_epoch,
+            "resume_batch_offset": resume_batch_offset,
             "partition": partition_cfg,
             "alpha_comp": None,  # Skip alpha/beta on second call
             "beta_comm": None,
@@ -470,6 +530,23 @@ def _should_skip_resume_batch(epoch: int) -> bool:
         _resume_batches_to_skip -= 1
         return True
     return False
+
+
+def _prepare_epoch_iterator(train_loader, epoch: int, max_steps_per_epoch: int = 0):
+    """Create an epoch-local iterator that respects resume offset and max-steps budget."""
+    global _resume_target_epoch, _resume_batches_to_skip
+
+    effective_total = len(train_loader)
+    if max_steps_per_epoch > 0:
+        effective_total = min(effective_total, int(max_steps_per_epoch))
+
+    resume_offset = 0
+    if epoch == _resume_target_epoch and _resume_batches_to_skip > 0:
+        resume_offset = min(int(_resume_batches_to_skip), effective_total)
+        # The offset is consumed by slicing the DataLoader for this epoch.
+        _resume_batches_to_skip = 0
+
+    return islice(train_loader, resume_offset, effective_total), resume_offset, effective_total
 
 
 def _run_dryrun_failover_cycle():
@@ -726,6 +803,9 @@ def main():
         _resume_target_epoch = start_epoch
         _resume_batches_to_skip = int(bootstrap["resume_batch_offset"])
 
+        # Keep worker-side slowdown injection aligned to the resumed global step.
+        args.resume_step_offset = int(niter)
+
         tspipe_trainer = TSPipe(
             snet,
             tnet,
@@ -740,6 +820,19 @@ def main():
             extra_args=args
         )
         assert args.kd_mode == 'logits' or args.kd_mode == 'st'
+
+        if bootstrap["enabled"]:
+            tspipe_trainer.batch_count = int(niter)
+            if (
+                tspipe_trainer.target_fail_gpu >= 0
+                and tspipe_trainer.fail_after_batches > 0
+                and tspipe_trainer.batch_count >= tspipe_trainer.fail_after_batches
+            ):
+                tspipe_trainer.failure_simulated = True
+                logging.error(
+                    "↪️ Resumed beyond scheduled hard-failure point; "
+                    f"disabling re-simulation (resume_step={niter}, fail_after={tspipe_trainer.fail_after_batches})"
+                )
         
         # NEW: Initialize slowdown detection and failover policy components
         slowdown_detector = SlowdownDetector(inject_scenario=args.failover_inject_scenario, slowdown_threshold=1.10,)
@@ -783,6 +876,16 @@ def main():
                     failover_optimizer.alpha_beta_estimator.beta_g.clear()
                     failover_optimizer.alpha_beta_estimator.beta_g.update(bootstrap_beta_comm)
                 logging.error(f"🔄 Restored beta_g from checkpoint: {failover_optimizer.beta_g}")
+
+        if failover_optimizer is not None:
+            _persist_latest_failover_coefficients(
+                save_root=args.save_root,
+                alpha_comp=failover_optimizer.alpha_g,
+                beta_comm=failover_optimizer.beta_g,
+                partition=getattr(failover_optimizer, "current_partition", None),
+                source="bootstrap_restore" if bootstrap["enabled"] else "initial_defaults",
+                step_id=niter,
+            )
 
         def _save_failover_checkpoint(meta):
             checkpoint_path = os.path.join(args.save_root, 'failover_checkpoint_latest.pth')
@@ -1036,13 +1139,20 @@ def train(train_loader, nets, optimizer, criterions, epoch, writer):
 
     end = time.time()
     global niter
-    # tqdm 진행바와 enumerate 시작 인덱스를 niter(복원 step)에 맞게 조정
-    pbar = tqdm(train_loader, initial=niter)
-    for i, (img, target) in enumerate(pbar, start=niter+1):
-        if i <= niter:
-            continue
-        if _should_skip_resume_batch(epoch):
-            continue
+    epoch_iter, resume_offset, effective_total = _prepare_epoch_iterator(
+        train_loader,
+        epoch,
+        args.max_steps_per_epoch,
+    )
+    if resume_offset >= effective_total:
+        logging.info(
+            f"↪️ Epoch {epoch} already satisfied quick-run budget "
+            f"(resume_offset={resume_offset}, total={effective_total}); skipping train loop"
+        )
+        return
+
+    pbar = tqdm(epoch_iter, initial=resume_offset, total=effective_total)
+    for epoch_step, (img, target) in enumerate(pbar, start=resume_offset + 1):
 
         data_time.update(time.time() - end)
 
@@ -1081,7 +1191,7 @@ def train(train_loader, nets, optimizer, criterions, epoch, writer):
         batch_time.update(time.time() - end)
         end = time.time()
 
-        if i % args.print_freq == 0:
+        if epoch_step % args.print_freq == 0:
             log_str = ('Epoch[{0}]:[{1:03}/{2:03}] '
                        'Time:{batch_time.val:.4f} '
                        'Data:{data_time.val:.4f}  '
@@ -1089,7 +1199,7 @@ def train(train_loader, nets, optimizer, criterions, epoch, writer):
                        'KD:{kd_losses.val:.4f}({kd_losses.avg:.4f})  '
                        'prec@1:{top1.val:.2f}({top1.avg:.2f})  '
                        'prec@5:{top5.val:.2f}({top5.avg:.2f})'.format(
-                       epoch, i, len(train_loader), batch_time=batch_time, data_time=data_time,
+                       epoch, epoch_step, effective_total, batch_time=batch_time, data_time=data_time,
                        cls_losses=cls_losses, kd_losses=kd_losses, top1=top1, top5=top5))
             logging.info(log_str)
 
@@ -1115,15 +1225,23 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                  max_steps_per_epoch: int = 0):
     global niter
 
-    pbar = tqdm(train_loader, initial=niter)
+    epoch_iter, resume_offset, effective_total = _prepare_epoch_iterator(
+        train_loader,
+        epoch,
+        max_steps_per_epoch,
+    )
+    if resume_offset >= effective_total:
+        logging.info(
+            f"↪️ Epoch {epoch} already satisfied quick-run budget "
+            f"(resume_offset={resume_offset}, total={effective_total}); skipping tspipe loop"
+        )
+        return
+
+    pbar = tqdm(epoch_iter, initial=resume_offset, total=effective_total)
     wallclock_sustain_sec = float(os.environ.get("FAILOVER_SLOWDOWN_THRESHOLD_SEC", "10.0"))
     trigger_threshold = 1.10
 
-    for i, (img, target) in enumerate(pbar, start=niter + 1):
-        if i <= niter:
-            continue
-        if _should_skip_resume_batch(epoch):
-            continue
+    for epoch_step, (img, target) in enumerate(pbar, start=resume_offset + 1):
 
         batch_start_time = time.time()
         loss = tspipe_trainer.feed(img, img, target)
@@ -1144,7 +1262,17 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
             timing_ingestor.update()
             timing_payload = timing_ingestor.build_timing_payload()
             if timing_payload:
-                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
+                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.4)
+
+        if failover_optimizer is not None:
+            _persist_latest_failover_coefficients(
+                save_root=args.save_root,
+                alpha_comp=failover_optimizer.alpha_g,
+                beta_comm=failover_optimizer.beta_g,
+                partition=getattr(failover_optimizer, "current_partition", None),
+                source="runtime_update",
+                step_id=niter,
+            )
 
         # 4) wall-clock trigger source
         trigger_state = None
@@ -1153,6 +1281,7 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                 slowdown_detector.record_stage_time(
                     batch_elapsed_time_ms,
                     timestamp_sec=time.time(),
+                    global_step=niter,
                 )
             except TypeError:
                 slowdown_detector.record_stage_time(batch_elapsed_time_ms)
@@ -1251,9 +1380,6 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
         pbar.set_postfix({'loss': loss, 'batch_id': niter})
 
         niter += 1
-
-        if max_steps_per_epoch > 0 and i >= max_steps_per_epoch:
-            break
 
 
 def test(test_loader, nets, criterions, epoch):

@@ -876,7 +876,7 @@ def train_tspipe(tspipe_trainer, train_loader, nets, optimizer, criterions, epoc
             timing_ingestor.update()
             timing_payload = timing_ingestor.build_timing_payload()
             if timing_payload:
-                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
+                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.4)
 
         if slowdown_detector is not None:
             slowdown_detector.record_stage_time(batch_elapsed_time_ms)

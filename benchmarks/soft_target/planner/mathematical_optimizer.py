@@ -842,7 +842,7 @@ class MathematicalFailoverOptimizer:
         baseline_compute_time: Optional[float] = None,
         current_comm_time: Optional[float] = None,
         baseline_comm_time: Optional[float] = None,
-        ema: float = 0.2,
+        ema: float = 0.4,
     ):
         """Update alpha/beta from measured runtime ratios (optional runtime hook)."""
         if not self.use_mathematical_model or self.alpha_beta_estimator is None:
@@ -878,7 +878,7 @@ class MathematicalFailoverOptimizer:
         comm_time: float,
         baseline_compute_time: Optional[float] = None,
         baseline_comm_time: Optional[float] = None,
-        ema: float = 0.2,
+        ema: float = 0.4,
     ):
         """
         Ingest measured per-GPU timings and update alpha/beta.
@@ -940,7 +940,7 @@ class MathematicalFailoverOptimizer:
     def ingest_runtime_timing_batch(
         self,
         timing_by_gpu: Dict[int, Dict[str, float]],
-        ema: float = 0.2,
+        ema: float = 0.4,
     ):
         """
         Batch ingestion helper.
@@ -991,7 +991,7 @@ def monitor_and_replan_with_mathematical_model(total_epochs: int = 1, steps_per_
                     gpu_id=gpu_id,
                     compute_time=compute_t,
                     comm_time=comm_t,
-                    ema=0.2,
+                    ema=0.4,
                 )
                 
                 if simulated_slowdown > 1.05:  # 5% 이상 느려진 경우
@@ -1046,7 +1046,7 @@ def benchmark_eta_overhead(
     for step in range(3):
         optimizer.update_training_progress(step_id=step, epoch=0)
         batch = {g: {"compute_time": 0.10, "comm_time": 0.02} for g in gpu_ids}
-        optimizer.ingest_runtime_timing_batch(batch, ema=0.2)
+        optimizer.ingest_runtime_timing_batch(batch, ema=0.4)
 
     # warmup 경계 이후 한 번 더 호출해서 baseline freeze 유도
     optimizer.update_training_progress(step_id=optimizer.baseline_warmup_steps, epoch=0)

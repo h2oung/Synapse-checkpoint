@@ -29,6 +29,8 @@ class SlowdownDetector:
 
         self.batch_count = 0
         self.slowdown_detected_at_step = None
+        self.slowdown_detected_at_global_step = None
+        self.last_global_step: Optional[int] = None
 
         # wall-clock sustained trigger state
         self.wallclock_slowdown_started_at: Optional[float] = None
@@ -36,12 +38,18 @@ class SlowdownDetector:
 
         self.logger.info("✅ SlowdownDetector initialized")
 
-    def record_stage_time(self, stage_time_ms: float, timestamp_sec: Optional[float] = None):
+    def record_stage_time(
+        self,
+        stage_time_ms: float,
+        timestamp_sec: Optional[float] = None,
+        global_step: Optional[int] = None,
+    ):
         """
         매 step마다 wall-clock elapsed time(ms)를 기록한다.
         """
         self.stage_times.append(float(stage_time_ms))
         self.batch_count += 1
+        self.last_global_step = None if global_step is None else int(global_step)
 
         now = float(timestamp_sec) if timestamp_sec is not None else time.time()
 
@@ -72,14 +80,23 @@ class SlowdownDetector:
 
             if self.slowdown_detected_at_step is None:
                 self.slowdown_detected_at_step = self.batch_count
-                self.logger.warning(
-                    f"⚠️ Wall-clock slowdown detected at step {self.batch_count}: "
-                    f"{slowdown:.3f}x (threshold: {self.slowdown_threshold:.2f})"
-                )
+                self.slowdown_detected_at_global_step = self.last_global_step
+                if self.last_global_step is not None:
+                    self.logger.warning(
+                        "⚠️ Wall-clock slowdown detected "
+                        f"(local_step={self.batch_count}, global_step={self.last_global_step}): "
+                        f"{slowdown:.3f}x (threshold: {self.slowdown_threshold:.2f})"
+                    )
+                else:
+                    self.logger.warning(
+                        f"⚠️ Wall-clock slowdown detected at step {self.batch_count}: "
+                        f"{slowdown:.3f}x (threshold: {self.slowdown_threshold:.2f})"
+                    )
         else:
             self.wallclock_slowdown_started_at = None
             self.wallclock_sustained_duration_sec = 0.0
             self.slowdown_detected_at_step = None
+            self.slowdown_detected_at_global_step = None
 
     def get_slowdown_ratio(self) -> float:
         if self.baseline_stage_time is None:
@@ -112,6 +129,9 @@ class SlowdownDetector:
             "baseline_stage_time_ms": self.baseline_stage_time,
             "baseline_std_ms": self.baseline_std,
             "batch_count": self.batch_count,
+            "global_step": self.last_global_step,
+            "slowdown_detected_at_step": self.slowdown_detected_at_step,
+            "slowdown_detected_at_global_step": self.slowdown_detected_at_global_step,
         }
 
     def get_statistics(self) -> Dict:
@@ -136,4 +156,6 @@ class SlowdownDetector:
             "recent_max_ms": float(np.max(recent)) if recent else None,
             "wallclock_sustained_duration_sec": self.wallclock_sustained_duration_sec,
             "slowdown_detected_at_step": self.slowdown_detected_at_step,
+            "slowdown_detected_at_global_step": self.slowdown_detected_at_global_step,
+            "global_step": self.last_global_step,
         }

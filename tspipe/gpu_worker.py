@@ -455,6 +455,7 @@ class GpuWorker(BaseWorker):
         self.slowdown_factor = _opt(arg_src, "slowdown_factor", None)
         self.slowdown_start = _opt(arg_src, "slowdown_start", None)
         self.slowdown_end = _opt(arg_src, "slowdown_end", None)
+        self.resume_step_offset = int(_opt(arg_src, "resume_step_offset", 0) or 0)
         self.slowdown_task_scope = _opt(arg_src, "slowdown_task_scope", "compute")
         if self.slowdown_task_scope is None:
             self.slowdown_task_scope = "compute"
@@ -464,7 +465,8 @@ class GpuWorker(BaseWorker):
             f"[SlowdownConfig] partition={self.partition_id}, "
             f"device_id={self.device_id}, target_gpu={self.slowdown_gpu}, "
             f"factor={self.slowdown_factor}, range=({self.slowdown_start}, {self.slowdown_end}), "
-            f"scope={self.slowdown_task_scope}, arg_src={type(arg_src).__name__}"
+            f"scope={self.slowdown_task_scope}, resume_step_offset={self.resume_step_offset}, "
+            f"arg_src={type(arg_src).__name__}"
         )       
         Log.d("Received args, args = ", self.args)
         Log.d("Received config, args = ", self.config)
@@ -809,18 +811,25 @@ class GpuWorker(BaseWorker):
             return False
         return int(self.device_id) == int(self.slowdown_gpu)
 
+    def _task_local_step(self, task: 'GpuTask') -> int:
+        return max(0, int(task.batch_id) - 1)
+
+    def _task_global_step(self, task: 'GpuTask') -> int:
+        return int(self.resume_step_offset) + self._task_local_step(task)
+
     def _is_in_slowdown_window(self, task: 'GpuTask') -> bool:
         if self.slowdown_start is None or self.slowdown_end is None:
             return False
 
-        # train_kd.py 쪽 niter semantics와 맞추기 위해 batch_id-1 기준으로 비교
-        step_like = max(0, int(task.batch_id) - 1)
+        # Anchor worker-local batch ids to the resumed global step across restarts.
+        step_like = self._task_global_step(task)
         return int(self.slowdown_start) <= step_like < int(self.slowdown_end)
 
     def _log_slowdown_skip(self, task: 'GpuTask', reason: str, extra: Optional[str] = None):
         key = self._task_baseline_key(task) or "unknown"
         scope = self._task_scope_of(task)
-        step_like = max(0, int(task.batch_id) - 1)
+        local_step = self._task_local_step(task)
+        global_step = self._task_global_step(task)
         counter_key = f"{reason}:{key}"
         self._slowdown_skip_counts[counter_key] += 1
         if self._slowdown_skip_counts[counter_key] % self._slowdown_skip_log_every != 0:
@@ -829,7 +838,8 @@ class GpuWorker(BaseWorker):
         suffix = f", {extra}" if extra else ""
         Log.i(
             f"🛑 [WorkerSlowdownSkip] partition={self.partition_id}, device_id={self.device_id}, "
-            f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, step={step_like}, "
+            f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
+            f"local_step={local_step}, global_step={global_step}, "
             f"reason={reason}{suffix}"
         )
 
@@ -930,6 +940,7 @@ class GpuWorker(BaseWorker):
         Log.i(
             f"🧪 [WorkerSlowdown] partition={self.partition_id}, device_id={self.device_id}, "
             f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
+            f"local_step={self._task_local_step(task)}, global_step={self._task_global_step(task)}, "
             f"baseline_ms={baseline_ms:.2f}, factor={self.slowdown_factor}, "
             f"sleep_ms={sleep_sec * 1000.0:.2f}"
         )

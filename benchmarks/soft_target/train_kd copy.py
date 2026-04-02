@@ -1186,7 +1186,7 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
             timing_ingestor.update()
             timing_payload = timing_ingestor.build_timing_payload()
             if timing_payload:
-                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.2)
+                failover_optimizer.ingest_runtime_timing_batch(timing_payload, ema=0.4)
 
         # Always feed wall-clock into SlowdownDetector for baseline tracking
         if slowdown_detector is not None:

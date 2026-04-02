@@ -5,8 +5,8 @@ tspipe:
     
   model_split: 
     # 4GPU 설정 활성화 (실제 실험에서 검증된 설정)
-    target: [12, 4, 7, 7]
-    online: [15, 9, 19, 14]
+    target: [5, 8, 6, 11]
+    online: [4, 11, 16, 26]
 
     # 4GPU 설정 활성화 (실제 실험에서 검증된 설정)
     #target: [8, 4, 4, 14]   

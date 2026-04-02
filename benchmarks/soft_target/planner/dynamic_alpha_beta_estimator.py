@@ -28,7 +28,7 @@ class DynamicAlphaBetaEstimator:
         gpu_id: int,
         compute_ratio: Optional[float] = None,
         comm_ratio: Optional[float] = None,
-        ema: float = 0.2,
+        ema: float = 0.4,
         min_ratio: float = 0.8,
         max_ratio: float = 10.0,
     ) -> AlphaBetaEstimate:

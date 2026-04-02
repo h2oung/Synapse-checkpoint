@@ -314,6 +314,8 @@ class ProcessHealthMonitor:
             
             # 죽은 프로세스들에 대해 콜백 호출
             for partition_id in dead_partitions:
+                if not self.running:
+                    break
                 try:
                     self.process_failure_callback(partition_id, "process_died")
                     del self.monitored_processes[partition_id]

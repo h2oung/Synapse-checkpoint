@@ -20,16 +20,15 @@ from utils import load_pretrained_model
 from tspipe.batch_ops import defaultScatterGatherFn
 
 tnet = create_model('vit_large', num_class=100, image_size=224)
-checkpoint = torch.load('../results/base/base-i100-vit-large/model_best.pth.tar', 'cpu')
+checkpoint = torch.load('/acpl-ssd10/Synapse-0320/results/base/base-i100-vit-large/initial_rrge.pth.tar', 'cpu')
 load_pretrained_model(tnet, checkpoint['net'])
 if not isinstance(tnet, torch.nn.Sequential):
     tnet = tnet.to_sequential()
 tnet.cuda()
-
 print("Teacher model loaded: %s" % tnet)
     
 snet = create_model('resnet152', num_class=100, image_size=224)
-checkpoint = torch.load('../results/base/base-i100-resnet152/initial_r152.pth.tar', 'cpu')
+checkpoint = torch.load('/acpl-ssd10/Synapse-0320/results/base/base-i100-resnet152/initial_r152.pth.tar', 'cpu')
 load_pretrained_model(snet, checkpoint['net'])
 if not isinstance(snet, torch.nn.Sequential):
     snet = snet.to_sequential()

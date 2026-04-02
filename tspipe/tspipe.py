@@ -16,6 +16,7 @@ import yaml
 import sys
 import psutil
 import os
+import logging
 
 import tspipe
 from tspipe import batch_ops
@@ -125,6 +126,7 @@ class TSPipe():
         self.fail_after_batches = args.fail_after_batches
         self.batch_count = 0
         self.failure_simulated = False
+        self.last_healthy_checkpoint_step = 0
         self._emergency_shutdown_started = False
         self.healthy_checkpoint_interval = max(0, args.healthy_checkpoint_interval)
         self.checkpoint_benchmark_enabled = args.checkpoint_benchmark_enable
@@ -218,6 +220,32 @@ class TSPipe():
                 f.write(json.dumps(payload, ensure_ascii=False) + "\n")
         except Exception as e:
             Log.e(f"Failed to append jsonl to {file_path}: {e}")
+
+    def _build_resume_compatible_checkpoint_payload(self, checkpoint_kind: str) -> Dict:
+        """Build a checkpoint payload that train_kd.py's soft resume loader can restore."""
+        payload = {
+            'checkpoint_kind': str(checkpoint_kind),
+            'save_timestamp': time(),
+            'batch_count': int(self.batch_count),
+            'global_step': int(self.batch_count),
+        }
+
+        if self.module_online is not None:
+            online_state = self.module_online.state_dict()
+            payload['student_state_dict'] = online_state
+            # Keep the legacy key for backward compatibility with older tooling.
+            payload['model_state_dict'] = online_state
+
+        if self.module_target is not None:
+            payload['teacher_state_dict'] = self.module_target.state_dict()
+
+        if self.optimizer is not None:
+            try:
+                payload['optimizer_state_dict'] = self.optimizer.state_dict()
+            except Exception as e:
+                Log.w(f"⚠️ Failed to serialize optimizer state for {checkpoint_kind} checkpoint: {e}")
+
+        return payload
 
     def _record_step_metric(self, step_id: int, step_time_ms: float):
         payload = {
@@ -433,6 +461,15 @@ class TSPipe():
         self._emergency_shutdown_started = True
 
         Log.e("🚨 Starting emergency shutdown and failover process...")
+
+        # Stop background monitors first so they do not keep cascading duplicate
+        # callbacks while the emergency shutdown is already in progress.
+        if self.gpu_health_monitor is not None:
+            self.gpu_health_monitor.running = False
+        if self.process_health_monitor is not None:
+            self.process_health_monitor.running = False
+        if self.experiment_logger is not None:
+            self.experiment_logger.collecting_metrics = False
         
         # 1. 현재 학습 루프 강제 중단
         self._force_stop_current_training()
@@ -450,8 +487,33 @@ class TSPipe():
         self._save_emergency_checkpoint()
         
         # 6. 프로세스 완전 종료 (재시작은 외부 스크립트가 담당)
-        Log.e("💀 Process termination scheduled - external restart required")
-        sys.exit(42)  # 모든 I/O 버퍼를 플러시한 후 우아한 종료
+        self._terminate_process_for_restart(exit_code=42)
+
+    def _terminate_process_for_restart(self, exit_code: int = 42):
+        """Terminate the entire Python process so the external launcher can restart it.
+
+        Hard-failure callbacks are often invoked from background monitor threads.
+        `sys.exit()` only stops the calling thread in that case, so the launcher
+        never sees the failover exit code. We flush logs explicitly, then force
+        a process-wide exit with the restart code.
+        """
+        Log.e(
+            f"💀 Process termination scheduled - external restart required "
+            f"(exit_code={int(exit_code)})"
+        )
+        try:
+            sys.stdout.flush()
+        except Exception:
+            pass
+        try:
+            sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            logging.shutdown()
+        except Exception:
+            pass
+        os._exit(int(exit_code))
 
     def _cleanup_distributed_environment(self):
         """분산 통신 환경 완전 정리 (Clean Shutdown)"""
@@ -531,15 +593,15 @@ class TSPipe():
             artifact_dir = self.config.get('__artifact_dir', '.')
             os.makedirs(artifact_dir, exist_ok=True)
             checkpoint_path = f"{artifact_dir}/emergency_checkpoint.pth"
-            # 현재 모델 상태 저장
-            if hasattr(self, 'online_partition'):
-                torch.save(self.online_partition.state_dict(), checkpoint_path)
-                Log.i(f"✅ Emergency checkpoint saved to {checkpoint_path}")
-            elif self.module_online is not None:
-                torch.save(self.module_online.state_dict(), checkpoint_path)
-                Log.i(f"✅ Emergency checkpoint saved from module_online to {checkpoint_path}")
-            else:
+            if self.module_online is None:
                 Log.w("⚠️ No online model found; skipping checkpoint save")
+                return
+
+            checkpoint_payload = self._build_resume_compatible_checkpoint_payload(
+                checkpoint_kind="emergency"
+            )
+            torch.save(checkpoint_payload, checkpoint_path)
+            Log.i(f"✅ Emergency checkpoint saved to {checkpoint_path}")
         except Exception as e:
             Log.e(f"❌ Failed to save emergency checkpoint: {e}")
 
@@ -552,11 +614,12 @@ class TSPipe():
 
             if self.module_online is not None:
                 save_start = time()
-                torch.save({
-                    'model_state_dict': self.module_online.state_dict(),
-                    'batch_count': self.batch_count,
-                    'save_timestamp': save_start,
-                }, checkpoint_path)
+                checkpoint_payload = self._build_resume_compatible_checkpoint_payload(
+                    checkpoint_kind="healthy"
+                )
+                checkpoint_payload['save_timestamp'] = save_start
+                torch.save(checkpoint_payload, checkpoint_path)
+                self.last_healthy_checkpoint_step = int(self.batch_count)
                 save_duration_sec = time() - save_start
                 file_size_bytes = os.path.getsize(checkpoint_path) if os.path.exists(checkpoint_path) else None
                 self._save_event_seq += 1
@@ -580,6 +643,54 @@ class TSPipe():
                 Log.i(f"✅ Healthy checkpoint saved: {checkpoint_path}")
         except Exception as e:
             Log.e(f"❌ Failed to save healthy checkpoint: {e}")
+
+    def _latest_alpha_beta_snapshot_path(self) -> str:
+        artifact_dir = self.config.get('__artifact_dir', '.')
+        os.makedirs(artifact_dir, exist_ok=True)
+        return f"{artifact_dir}/alpha_beta_latest.json"
+
+    def _load_latest_alpha_beta_snapshot(self, gpu_ids: Optional[List[int]] = None) -> Tuple[Optional[Dict[int, float]], Optional[Dict[int, float]]]:
+        snapshot_path = self._latest_alpha_beta_snapshot_path()
+        if not os.path.exists(snapshot_path):
+            return None, None
+
+        try:
+            with open(snapshot_path, 'r', encoding='utf-8') as f:
+                snapshot = json.load(f)
+        except Exception as e:
+            Log.w(f"⚠️ Failed to read alpha/beta snapshot {snapshot_path}: {e}")
+            return None, None
+
+        alpha_payload = snapshot.get('alpha_comp')
+        beta_payload = snapshot.get('beta_comm')
+        if not isinstance(alpha_payload, dict) or not isinstance(beta_payload, dict):
+            return None, None
+
+        alpha = {int(k): float(v) for k, v in alpha_payload.items()}
+        beta = {int(k): float(v) for k, v in beta_payload.items()}
+
+        if gpu_ids is not None:
+            filtered_gpu_ids = [int(gpu_id) for gpu_id in gpu_ids]
+            alpha = {gpu_id: float(alpha.get(gpu_id, 1.0)) for gpu_id in filtered_gpu_ids}
+            beta = {gpu_id: float(beta.get(gpu_id, 1.0)) for gpu_id in filtered_gpu_ids}
+
+        return alpha, beta
+
+    def _resolve_restart_alpha_beta(self, gpu_ids: List[int]) -> Tuple[Dict[int, float], Dict[int, float], str]:
+        filtered_gpu_ids = [int(gpu_id) for gpu_id in gpu_ids]
+
+        snapshot_alpha, snapshot_beta = self._load_latest_alpha_beta_snapshot(filtered_gpu_ids)
+        if snapshot_alpha is not None and snapshot_beta is not None:
+            return snapshot_alpha, snapshot_beta, "runtime_snapshot"
+
+        if hasattr(self, 'alpha_g') and hasattr(self, 'beta_g'):
+            alpha = {gpu_id: float(self.alpha_g.get(gpu_id, 1.0)) for gpu_id in filtered_gpu_ids}
+            beta = {gpu_id: float(self.beta_g.get(gpu_id, 1.0)) for gpu_id in filtered_gpu_ids}
+            return alpha, beta, "tspipe_state"
+
+        alpha = {gpu_id: 1.0 for gpu_id in filtered_gpu_ids}
+        beta = {gpu_id: 1.0 for gpu_id in filtered_gpu_ids}
+        return alpha, beta, "defaults"
             
     def _prepare_k_minus_1_restart(self, failed_gpu_id: int):
         """K-1 GPU 재분할 정보 준비"""
@@ -599,6 +710,8 @@ class TSPipe():
             artifact_dir = self.config.get('__artifact_dir', '.')
             os.makedirs(artifact_dir, exist_ok=True)
             restart_config_path = f"{artifact_dir}/emergency_restart_config.json"
+            restart_alpha, restart_beta, coeff_source = self._resolve_restart_alpha_beta(available_gpus)
+            resume_step = int(self.last_healthy_checkpoint_step) if int(self.last_healthy_checkpoint_step) > 0 else int(self.batch_count)
 
             # Persist minimal emergency payload first so external supervisor always has
             # a consumable restart config even if DP repartition crashes mid-path.
@@ -609,11 +722,16 @@ class TSPipe():
                 'original_config': self.original_partition_config,
                 'checkpoint_path': f"{artifact_dir}/healthy_checkpoint_latest.pth",
                 'emergency_checkpoint_path': f"{artifact_dir}/emergency_checkpoint.pth",
-                'failover_timestamp': time()
+                'failover_timestamp': time(),
+                'step_id': resume_step,
+                'alpha_comp': restart_alpha,
+                'beta_comm': restart_beta,
+                'alpha_beta_source': coeff_source,
             }
             with open(restart_config_path, 'w') as f:
                 json.dump(restart_config, f, indent=2)
             Log.i(f"✅ Emergency restart base configuration saved to {restart_config_path}")
+            Log.i(f"📊 Hard failover alpha/beta source: {coeff_source}")
 
             # Hard failure path: compute fresh K-1 contiguous partition via DP if planner is available.
             degraded_partition = None
@@ -621,12 +739,10 @@ class TSPipe():
                 from planner.stage_time_predictor import StageTimePredictor
 
                 predictor = StageTimePredictor()
-                clean_alpha = {int(g): 1.0 for g in available_gpus}
-                clean_beta = {int(g): 1.0 for g in available_gpus}
                 degraded_partition = predictor.solve_optimal_partition(
                     gpu_ids=available_gpus,
-                    alpha_g=clean_alpha,
-                    beta_g=clean_beta,
+                    alpha_g=restart_alpha,
+                    beta_g=restart_beta,
                 )
                 if degraded_partition is not None:
                     Log.i(
@@ -644,14 +760,22 @@ class TSPipe():
                     'snet_partition': [int(v) for v in degraded_partition.snet_partition],
                     'tnet_partition': [int(v) for v in degraded_partition.tnet_partition],
                 }
-                # K-1 GPU로 줄어든 partition에 맞게 alpha/beta 필터링
-                # gpu_assignment = [0, 1, 2] 라면, alpha/beta에서 이 3개 GPU만 유지
-                if hasattr(self, 'alpha_g') and hasattr(self, 'beta_g'):
-                    clean_alpha = {int(gpu): float(self.alpha_g.get(gpu, 0.5)) for gpu in degraded_partition.gpu_assignment}
-                    clean_beta = {int(gpu): float(self.beta_g.get(gpu, 1.0)) for gpu in degraded_partition.gpu_assignment}
-                    restart_config['alpha_comp'] = clean_alpha
-                    restart_config['beta_comm'] = clean_beta
-                    Log.i(f"✅ Saved filtered alpha/beta for K-1 partition: {list(degraded_partition.gpu_assignment)}")
+                # Keep the same learned alpha/beta as soft failover, only excluding the failed GPU.
+                filtered_alpha = {
+                    int(gpu): float(restart_alpha.get(int(gpu), 1.0))
+                    for gpu in degraded_partition.gpu_assignment
+                }
+                filtered_beta = {
+                    int(gpu): float(restart_beta.get(int(gpu), 1.0))
+                    for gpu in degraded_partition.gpu_assignment
+                }
+                restart_config['alpha_comp'] = filtered_alpha
+                restart_config['beta_comm'] = filtered_beta
+                restart_config['alpha_beta_source'] = coeff_source
+                Log.i(
+                    f"✅ Saved filtered alpha/beta from {coeff_source} "
+                    f"for K-1 partition: {list(degraded_partition.gpu_assignment)}"
+                )
 
             with open(restart_config_path, 'w') as f:
                 json.dump(restart_config, f, indent=2)
@@ -666,6 +790,13 @@ class TSPipe():
 
     def _on_process_failure(self, partition_id: int, failure_reason: str):
         """프로세스 실패 이벤트 핸들러"""
+        if self._emergency_shutdown_started:
+            Log.w(
+                f"⚠️ Process failure ignored during active emergency shutdown "
+                f"(partition={partition_id}, reason={failure_reason})"
+            )
+            return
+
         Log.e(f"💀 Process for partition {partition_id} failed: {failure_reason}")
 
         failed_gpu_id = None

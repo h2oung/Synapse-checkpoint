@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-export DEFAULT_VISIBLE_GPUS=1,2,5,6
+export DEFAULT_VISIBLE_GPUS=0,3,4,5
 export E2E_MASTER_IP=127.0.0.1
 
 unset FAILOVER_INJECT_SCENARIO
 export FAILOVER_TEST_FAST_GATES=0
-export FAILOVER_SLOWDOWN_THRESHOLD_SEC=5.0
+export FAILOVER_SLOWDOWN_THRESHOLD_SEC=30.0
 
-export RUN_NOTE="e2e_failover_0329"
+export RUN_NOTE="e2e_failover_0401_128"
 
 # 현재 train_kd.py 구현은 inject-slowdown-gpu를 실제 GPU index가 아니라
 # tspipe_trainer.rank와 비교하고 있음.
@@ -26,11 +26,11 @@ bash ./run_e2e_failover.sh \
   --s_init=/acpl-ssd10/Synapse-private/benchmarks/results/base/base-i100-resnet152/initial_r152.pth.tar \
   --batch_size=128 \
   --num_class=100 \
-  --epochs=10 \
+  --epochs=2 \
   --max-steps-per-epoch=0 \
   --tspipe-enable \
   --tspipe-config=benchmarks/soft_target/tspipe.yaml \
   --inject-slowdown-gpu="${SLOWDOWN_GPU}" \
   --slowdown-factor=3.0 \
-  --slowdown-start=30 \
-  --slowdown-end=4000
+  --slowdown-start=55 \
+  --slowdown-end=9999999 \
