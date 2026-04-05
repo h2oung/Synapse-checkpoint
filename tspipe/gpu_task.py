@@ -859,17 +859,17 @@ class GpuTask():
 
     # For profiling runtime and memory usage of each task
     task_fn_map = {
-        TaskType.TASK_COMPUTE_FORWARD:  (create_compute_profile_hooks("compute_forward", compute_forward),      compute_forward_condition   ),
-        TaskType.TASK_COMPUTE_BACKWARD: (create_compute_profile_hooks("compute_backward", compute_backward),    None                        ),
-        TaskType.TASK_COMPUTE_LOSS:     (create_compute_profile_hooks("compute_loss", compute_loss),            None                        ),
-        TaskType.TASK_COPY_BATCH:       (create_compute_profile_hooks("copy_batch", copy_batch),                copy_batch_condition        ),
-        TaskType.TASK_COPY_BATCH_OUT:   (create_compute_profile_hooks("copy_batch_out", copy_batch_out),        copy_batch_out_condition    ),
-        TaskType.TASK_COPY_MODEL:       (create_compute_profile_hooks("copy_model", copy_model),                copy_model_condition        ),
-        TaskType.TASK_COPY_GRAD:        (create_compute_profile_hooks("copy_grad", copy_grad),                  None                        ),
-        TaskType.TASK_COPY_GRAD_OUT:    (create_compute_profile_hooks("copy_grad_out", copy_grad_out),          copy_grad_out_condition     ),    
-        TaskType.TASK_FEED_BATCH:       (create_compute_profile_hooks("feed_batch", feed_batch),                None                        ),
-        TaskType.TASK_TERMINATE:        (create_compute_profile_hooks("terminate", terminate),                  None                        ),
-        TaskType.TASK_COMPUTE_OPTIMIZE_GPU: (create_compute_profile_hooks("compute_optimize", compute_optimize_gpu), None                   ),
+        TaskType.TASK_COMPUTE_FORWARD:  (create_compute_profile_hooks("compute_forward", compute_forward, record_gpu_util=True),       compute_forward_condition   ),
+        TaskType.TASK_COMPUTE_BACKWARD: (create_compute_profile_hooks("compute_backward", compute_backward, record_gpu_util=True),     None                        ),
+        TaskType.TASK_COMPUTE_LOSS:     (create_compute_profile_hooks("compute_loss", compute_loss, record_gpu_util=True),             None                        ),
+        TaskType.TASK_COPY_BATCH:       (create_compute_profile_hooks("copy_batch", copy_batch, record_gpu_util=False),                copy_batch_condition        ),
+        TaskType.TASK_COPY_BATCH_OUT:   (create_compute_profile_hooks("copy_batch_out", copy_batch_out, record_gpu_util=False),        copy_batch_out_condition    ),
+        TaskType.TASK_COPY_MODEL:       (create_compute_profile_hooks("copy_model", copy_model, record_gpu_util=False),                copy_model_condition        ),
+        TaskType.TASK_COPY_GRAD:        (create_compute_profile_hooks("copy_grad", copy_grad, record_gpu_util=False),                  None                        ),
+        TaskType.TASK_COPY_GRAD_OUT:    (create_compute_profile_hooks("copy_grad_out", copy_grad_out, record_gpu_util=False),          copy_grad_out_condition     ),
+        TaskType.TASK_FEED_BATCH:       (create_compute_profile_hooks("feed_batch", feed_batch, record_gpu_util=False),                None                        ),
+        TaskType.TASK_TERMINATE:        (create_compute_profile_hooks("terminate", terminate, record_gpu_util=False),                  None                        ),
+        TaskType.TASK_COMPUTE_OPTIMIZE_GPU: (create_compute_profile_hooks("compute_optimize", compute_optimize_gpu, record_gpu_util=True), None                   ),
     }
 
     def check_precondition(self, ctx: Union[GpuTaskContext, LocalTaskContext]) -> bool:

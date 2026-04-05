@@ -18,7 +18,7 @@ LEGACY_RESTART_CONFIG_PATH="${RUN_DIR}/restart_config.json"
 E2E_MASTER_IP="${E2E_MASTER_IP:-127.0.0.1}"
 
 # Default GPU set for initial boot (before any restart config exists).
-DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-2,3,5,6}"
+DEFAULT_VISIBLE_GPUS="${DEFAULT_VISIBLE_GPUS:-0,1,2,3}"
 
 # Optional restart limit to avoid infinite loops during debugging.
 MAX_RESTARTS="${MAX_RESTARTS:-0}"  # 0 means unlimited
@@ -65,6 +65,59 @@ echo "[E2E] Starting failover loop..."
 # Measure end-to-end wall-clock time across all restarts
 E2E_START_TIME=$(date +%s)
 E2E_START_TS=$(date '+%Y-%m-%d %H:%M:%S')
+E2E_SUMMARY_WRITTEN=0
+E2E_FINAL_STATUS="RUNNING"
+
+write_e2e_summary() {
+  local exit_code="${1:-0}"
+  local end_time elapsed_sec elapsed_min elapsed_rem end_ts
+
+  if [[ "${E2E_SUMMARY_WRITTEN}" -eq 1 ]]; then
+    return
+  fi
+
+  end_time=$(date +%s)
+  elapsed_sec=$((end_time - E2E_START_TIME))
+  if [[ ${elapsed_sec} -lt 0 ]]; then
+    elapsed_sec=0
+  fi
+  elapsed_min=$((elapsed_sec / 60))
+  elapsed_rem=$((elapsed_sec % 60))
+  end_ts=$(date '+%Y-%m-%d %H:%M:%S')
+
+  {
+    echo "[E2E] Run note: ${RUN_NOTE}"
+    echo "[E2E] Run dir: ${RUN_DIR}"
+    echo "[E2E] Status: ${E2E_FINAL_STATUS}"
+    echo "[E2E] Exit code: ${exit_code}"
+    echo "[E2E] Restart count: ${RESTART_COUNT}"
+    echo "[E2E] Start time: ${E2E_START_TS}"
+    echo "[E2E] End time:   ${end_ts}"
+    echo "[E2E] Total wall-clock time: ${elapsed_sec}s (${elapsed_min}m ${elapsed_rem}s)"
+  } | tee "${E2E_SUMMARY_PATH}"
+
+  E2E_SUMMARY_WRITTEN=1
+}
+
+handle_signal() {
+  local signal_name="$1"
+  local exit_code="$2"
+  E2E_FINAL_STATUS="INTERRUPTED_${signal_name}"
+  exit "${exit_code}"
+}
+
+trap 'write_e2e_summary "$?"' EXIT
+trap 'handle_signal INT 130' INT
+trap 'handle_signal TERM 143' TERM
+
+{
+  echo "[E2E] Run note: ${RUN_NOTE}"
+  echo "[E2E] Run dir: ${RUN_DIR}"
+  echo "[E2E] Status: RUNNING"
+  echo "[E2E] Restart count: ${RESTART_COUNT}"
+  echo "[E2E] Start time: ${E2E_START_TS}"
+  echo "[E2E] Summary file initialized; final wall-clock will be written on exit."
+} > "${E2E_SUMMARY_PATH}"
 
 while true; do
   GPU_ASSIGNMENT=""
@@ -214,18 +267,8 @@ PY
   echo "[E2E] train_kd.py exited with code ${EXIT_CODE}"
 
   if [[ "${EXIT_CODE}" -eq 0 ]]; then
-    E2E_END_TIME=$(date +%s)
-    E2E_ELAPSED_SEC=$((E2E_END_TIME - E2E_START_TIME))
-    if [[ ${E2E_ELAPSED_SEC} -lt 0 ]]; then
-      E2E_ELAPSED_SEC=0
-    fi
-    E2E_ELAPSED_MIN=$((E2E_ELAPSED_SEC / 60))
-    E2E_ELAPSED_REM=$((E2E_ELAPSED_SEC % 60))
-    E2E_END_TS=$(date '+%Y-%m-%d %H:%M:%S')
-    echo "[E2E] Start time: ${E2E_START_TS}" | tee -a "${E2E_SUMMARY_PATH}"
-    echo "[E2E] End time:   ${E2E_END_TS}" | tee -a "${E2E_SUMMARY_PATH}"
-    echo "[E2E] Total wall-clock time: ${E2E_ELAPSED_SEC}s (${E2E_ELAPSED_MIN}m ${E2E_ELAPSED_REM}s)" | tee -a "${E2E_SUMMARY_PATH}"
-    echo "[E2E] Training completed normally. Exiting launcher." | tee -a "${E2E_SUMMARY_PATH}"
+    E2E_FINAL_STATUS="COMPLETED"
+    echo "[E2E] Training completed normally. Exiting launcher."
     break
   fi
 
@@ -235,6 +278,7 @@ PY
 
     if [[ "${MAX_RESTARTS}" -gt 0 && "${RESTART_COUNT}" -ge "${MAX_RESTARTS}" ]]; then
       echo "[E2E] Reached MAX_RESTARTS=${MAX_RESTARTS}. Stopping launcher."
+      E2E_FINAL_STATUS="MAX_RESTARTS_REACHED"
       exit 1
     fi
 
@@ -243,5 +287,6 @@ PY
   fi
 
   echo "[E2E] Unexpected failure exit code ${EXIT_CODE}. Stopping launcher."
+  E2E_FINAL_STATUS="FAILED"
   exit "${EXIT_CODE}"
 done

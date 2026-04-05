@@ -170,8 +170,53 @@ class TSPipe():
         # self.max_step_profiling = self.config['train']['max_step_profiling']
         self.max_step_profiling = None
         
-        if self.num_nodes*self.num_devices != len(self.config['model_split']['online']):
-            raise ValueError(f"The number of GPUs and the number of partitions must match.")
+        partition_count = len(self.config['model_split']['online'])
+        if len(self.config['model_split']['target']) != partition_count:
+            raise ValueError(
+                "Online/target partition counts must match: "
+                f"online={partition_count}, target={len(self.config['model_split']['target'])}"
+            )
+
+        detected_gpu_count = self.num_nodes * self.num_devices
+        if detected_gpu_count != partition_count:
+            # Single-node launcher restarts can leave stale restart config/GPU visibility.
+            # Try to auto-heal rather than crashing immediately.
+            if self.num_nodes != 1:
+                raise ValueError(
+                    "The number of GPUs and the number of partitions must match: "
+                    f"gpus={detected_gpu_count}, partitions={partition_count}"
+                )
+
+            if detected_gpu_count <= 0:
+                raise ValueError(
+                    "No visible CUDA devices detected while partitions are configured: "
+                    f"partitions={partition_count}"
+                )
+
+            if detected_gpu_count < partition_count:
+                online_split = [int(v) for v in self.config['model_split']['online']]
+                target_split = [int(v) for v in self.config['model_split']['target']]
+                while len(online_split) > detected_gpu_count:
+                    online_split[-2] += online_split[-1]
+                    target_split[-2] += target_split[-1]
+                    online_split.pop()
+                    target_split.pop()
+                self.config['model_split']['online'] = online_split
+                self.config['model_split']['target'] = target_split
+                Log.w(
+                    "⚠️ GPU/partition mismatch auto-fixed by merging tail partitions: "
+                    f"gpus={detected_gpu_count}, original_partitions={partition_count}, "
+                    f"new_online={online_split}, new_target={target_split}"
+                )
+            else:
+                # More visible GPUs than partitions: use only as many GPUs as partitions.
+                self.num_devices = partition_count
+                self.total_world_size = self.num_devices * self.num_nodes + 1
+                self.num_total_devices = self.num_devices * self.num_nodes
+                Log.w(
+                    "⚠️ GPU/partition mismatch auto-fixed by limiting visible partitions to configured split: "
+                    f"gpus={detected_gpu_count}, partitions={partition_count}, using_gpus={self.num_devices}"
+                )
         
         if self.config['gpipe_emulation']['enabled']:
             self.num_ubatches = self.config['gpipe_emulation']['num_ubatch']

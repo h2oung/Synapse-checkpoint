@@ -1,6 +1,25 @@
 import os
 import time
 import sys
+from pathlib import Path
+
+_TMPDIR_CANDIDATES = [Path("/dev/shm") / "synapse_profiler_tmp",
+                      Path("/tmp") / "synapse_profiler_tmp",
+                      Path(__file__).resolve().parent / ".tmp"]
+for _candidate in _TMPDIR_CANDIDATES:
+    try:
+        _candidate.mkdir(parents=True, exist_ok=True)
+        _TMPDIR = _candidate
+        break
+    except OSError:
+        continue
+else:
+    raise RuntimeError("No usable temporary directory available for profiler.py")
+
+os.environ.setdefault("TMPDIR", str(_TMPDIR))
+os.environ.setdefault("TEMP", str(_TMPDIR))
+os.environ.setdefault("TMP", str(_TMPDIR))
+
 sys.path.append("..")
 import csv
 import argparse
@@ -9,6 +28,7 @@ import torch
 import torch.nn.functional as F
 import torch.backends.cudnn as cudnn
 import torchvision.transforms as transforms
+import torchvision.datasets as tv_datasets
 import torchmodules.torchprofiler as torchprofiler
 import numpy as np
 from functools import partial
@@ -20,7 +40,7 @@ from utils import load_pretrained_model
 from tspipe.batch_ops import defaultScatterGatherFn
 
 tnet = create_model('vit_large', num_class=100, image_size=224)
-checkpoint = torch.load('/acpl-ssd10/Synapse-0320/results/base/base-i100-vit-large/initial_rrge.pth.tar', 'cpu')
+checkpoint = torch.load('/workspace/Synapse/Synapse/benchmarks/soft_target/results/base/base-i100-vit-large/model_best.pth.tar', 'cpu')
 load_pretrained_model(tnet, checkpoint['net'])
 if not isinstance(tnet, torch.nn.Sequential):
     tnet = tnet.to_sequential()
@@ -28,7 +48,7 @@ tnet.cuda()
 print("Teacher model loaded: %s" % tnet)
     
 snet = create_model('resnet152', num_class=100, image_size=224)
-checkpoint = torch.load('/acpl-ssd10/Synapse-0320/results/base/base-i100-resnet152/initial_r152.pth.tar', 'cpu')
+checkpoint = torch.load('/workspace/Synapse/Synapse/benchmarks/soft_target/results/base/base-i100-resnet152/initial_r152.pth.tar', 'cpu')
 load_pretrained_model(snet, checkpoint['net'])
 if not isinstance(snet, torch.nn.Sequential):
     snet = snet.to_sequential()
@@ -77,18 +97,16 @@ optimizer = torch.optim.SGD(snet.parameters(), lr=0.1,
 
 cudnn.benchmark = True
 
-dataset = small_datasets.ImageNet100
 mean = (0.485, 0.456, 0.406)
 std = (0.229, 0.224, 0.225)
-train_dataset = partial(dataset, split='train')
 
 train_transform = transforms.Compose([
-        transforms.Pad(4, padding_mode='reflect'),
-        transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(mean=mean, std=std)
-    ])
+    transforms.Pad(4, padding_mode='reflect'),
+    transforms.RandomResizedCrop(224, scale=(0.08, 1.)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=mean, std=std)
+])
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--batch_size', type=int, default=128)
@@ -96,9 +114,19 @@ args = parser.parse_args()
 
 print(f"[Info] Profiling with batch size = {args.batch_size}")
 
+dataset = small_datasets.ImageNet100
+train_dataset = partial(dataset, split='train')
+
 train_loader = torch.utils.data.DataLoader(
-    train_dataset(root='/nas-ssd/datasets/imagenet2012/imagenet', transform=train_transform),
-    batch_size=args.batch_size, shuffle=True, num_workers=24, pin_memory=True)
+    train_dataset(
+        root='/workspace/datasets/imagenet',
+        transform=train_transform
+    ),
+    batch_size=args.batch_size,
+    shuffle=True,
+    num_workers=24,
+    pin_memory=True
+)
 
 class AverageMeter(object):
     """Computes and stores the average and current value"""

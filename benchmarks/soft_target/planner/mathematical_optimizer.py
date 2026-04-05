@@ -230,9 +230,18 @@ class MathematicalFailoverOptimizer:
                 self.logger.error(f"❌ Failed to save failover checkpoint: {e}")
                 checkpoint_path = None
 
-        if checkpoint_path:
-            payload["checkpoint_path"] = str(checkpoint_path)
-            self._write_restart_config(payload)
+        if not checkpoint_path:
+            # Guard against infinite restart loops:
+            # if no checkpoint artifact exists, a launcher restart would boot fresh,
+            # re-hit the same failover gate, and restart again.
+            self.logger.error(
+                "❌ Restart skipped: checkpoint artifact was not created. "
+                "Continuing in-process to avoid restart loop."
+            )
+            return
+
+        payload["checkpoint_path"] = str(checkpoint_path)
+        self._write_restart_config(payload)
 
         # Step 3: Exit for external process supervisor restart.
         self.logger.error(

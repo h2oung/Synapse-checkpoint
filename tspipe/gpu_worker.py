@@ -4,7 +4,7 @@ from copy import deepcopy
 from queue import Empty
 from queue import Queue as LocalQueue
 from threading import Condition, Thread
-from time import sleep, time
+from time import monotonic, sleep, time
 from typing import Callable, Dict, List, Optional, Union
 from multiprocessing import Process, Queue
 from .profiler_utils import init_gpu_task_profiler, stop_gpu_task_profiler
@@ -391,10 +391,15 @@ class GpuWorker(BaseWorker):
         self.optimizer_pg_param_map: Optional[Dict[int, List[int]]] = None
         # Worker-side slowdown injection config
         self.slowdown_gpu: Optional[int] = None
+        self.slowdown_mode: str = "ratio"
         self.slowdown_factor: Optional[float] = None
+        self.slowdown_fixed_ms: Optional[float] = None
         self.slowdown_start: Optional[int] = None
         self.slowdown_end: Optional[int] = None
+        self.slowdown_warmup_sec: Optional[float] = None
+        self.slowdown_duration_sec: Optional[float] = None
         self.slowdown_task_scope: str = "compute"
+        self._slowdown_wallclock_anchor_sec: Optional[float] = None
 
         # Per-task baseline runtime (ms), learned outside slowdown window
         self._task_baseline_ms: Dict[str, float] = {}
@@ -452,19 +457,40 @@ class GpuWorker(BaseWorker):
         arg_src = self.extra_args if self.extra_args is not None else self.args
 
         self.slowdown_gpu = _opt(arg_src, "inject_slowdown_gpu", None)
+        self.slowdown_mode = str(_opt(arg_src, "slowdown_mode", "ratio") or "ratio").strip().lower()
+        if self.slowdown_mode not in {"ratio", "fixed"}:
+            Log.i(f"[SlowdownConfig] Invalid slowdown_mode={self.slowdown_mode}; fallback to ratio")
+            self.slowdown_mode = "ratio"
         self.slowdown_factor = _opt(arg_src, "slowdown_factor", None)
+        self.slowdown_fixed_ms = _opt(arg_src, "slowdown_fixed_ms", None)
         self.slowdown_start = _opt(arg_src, "slowdown_start", None)
         self.slowdown_end = _opt(arg_src, "slowdown_end", None)
+        self.slowdown_warmup_sec = _opt(arg_src, "slowdown_warmup_sec", None)
+        self.slowdown_duration_sec = _opt(arg_src, "slowdown_duration_sec", None)
         self.resume_step_offset = int(_opt(arg_src, "resume_step_offset", 0) or 0)
         self.slowdown_task_scope = _opt(arg_src, "slowdown_task_scope", "compute")
         if self.slowdown_task_scope is None:
             self.slowdown_task_scope = "compute"
         self.slowdown_task_scope = str(self.slowdown_task_scope).strip().lower()
 
+        if self.slowdown_warmup_sec is not None:
+            self.slowdown_warmup_sec = float(self.slowdown_warmup_sec)
+        if self.slowdown_duration_sec is not None:
+            self.slowdown_duration_sec = float(self.slowdown_duration_sec)
+        if self.slowdown_fixed_ms is not None:
+            self.slowdown_fixed_ms = float(self.slowdown_fixed_ms)
+
+        window_desc = f"step_range=({self.slowdown_start}, {self.slowdown_end})"
+        if self.slowdown_warmup_sec is not None or self.slowdown_duration_sec is not None:
+            window_desc = (
+                f"wallclock=(warmup={self.slowdown_warmup_sec}, "
+                f"duration={self.slowdown_duration_sec})"
+            )
+
         Log.i(
             f"[SlowdownConfig] partition={self.partition_id}, "
             f"device_id={self.device_id}, target_gpu={self.slowdown_gpu}, "
-            f"factor={self.slowdown_factor}, range=({self.slowdown_start}, {self.slowdown_end}), "
+            f"mode={self.slowdown_mode}, factor={self.slowdown_factor}, fixed_ms={self.slowdown_fixed_ms}, {window_desc}, "
             f"scope={self.slowdown_task_scope}, resume_step_offset={self.resume_step_offset}, "
             f"arg_src={type(arg_src).__name__}"
         )       
@@ -817,19 +843,73 @@ class GpuWorker(BaseWorker):
     def _task_global_step(self, task: 'GpuTask') -> int:
         return int(self.resume_step_offset) + self._task_local_step(task)
 
-    def _is_in_slowdown_window(self, task: 'GpuTask') -> bool:
-        if self.slowdown_start is None or self.slowdown_end is None:
-            return False
+    def _has_wallclock_slowdown_window(self) -> bool:
+        return (
+            self.slowdown_warmup_sec is not None and
+            self.slowdown_duration_sec is not None
+        )
 
-        # Anchor worker-local batch ids to the resumed global step across restarts.
-        step_like = self._task_global_step(task)
-        return int(self.slowdown_start) <= step_like < int(self.slowdown_end)
+    def _ensure_slowdown_wallclock_anchor(self, task: 'GpuTask') -> float:
+        if self._slowdown_wallclock_anchor_sec is None:
+            self._slowdown_wallclock_anchor_sec = monotonic()
+            Log.i(
+                f"⏱️ [SlowdownAnchor] partition={self.partition_id}, "
+                f"device_id={self.device_id}, batch={task.batch_id}, "
+                f"warmup_sec={self.slowdown_warmup_sec}, "
+                f"duration_sec={self.slowdown_duration_sec}"
+            )
+        return self._slowdown_wallclock_anchor_sec
+
+    def _capture_task_slowdown_window_state(self, task: 'GpuTask') -> dict:
+        cached = getattr(task, "_worker_slowdown_window_state", None)
+        if cached is not None:
+            return cached
+
+        if self._has_wallclock_slowdown_window():
+            anchor_sec = self._ensure_slowdown_wallclock_anchor(task)
+            elapsed_sec = max(0.0, monotonic() - anchor_sec)
+            start_sec = float(self.slowdown_warmup_sec)
+            end_sec = start_sec + float(self.slowdown_duration_sec)
+            state = {
+                "mode": "wallclock",
+                "in_window": start_sec <= elapsed_sec < end_sec,
+                "elapsed_sec": elapsed_sec,
+                "window_start_sec": start_sec,
+                "window_end_sec": end_sec,
+                "label": (
+                    f"warmup={start_sec:.2f}s, duration={float(self.slowdown_duration_sec):.2f}s, "
+                    f"elapsed={elapsed_sec:.2f}s"
+                ),
+            }
+        elif self.slowdown_start is not None and self.slowdown_end is not None:
+            global_step = self._task_global_step(task)
+            state = {
+                "mode": "step",
+                "in_window": int(self.slowdown_start) <= global_step < int(self.slowdown_end),
+                "global_step": global_step,
+                "window_start_step": int(self.slowdown_start),
+                "window_end_step": int(self.slowdown_end),
+                "label": f"range=({self.slowdown_start}, {self.slowdown_end}), global_step={global_step}",
+            }
+        else:
+            state = {
+                "mode": "none",
+                "in_window": False,
+                "label": "no_window",
+            }
+
+        setattr(task, "_worker_slowdown_window_state", state)
+        return state
+
+    def _is_in_slowdown_window(self, task: 'GpuTask') -> bool:
+        return bool(self._capture_task_slowdown_window_state(task).get("in_window", False))
 
     def _log_slowdown_skip(self, task: 'GpuTask', reason: str, extra: Optional[str] = None):
         key = self._task_baseline_key(task) or "unknown"
         scope = self._task_scope_of(task)
         local_step = self._task_local_step(task)
         global_step = self._task_global_step(task)
+        window_state = self._capture_task_slowdown_window_state(task)
         counter_key = f"{reason}:{key}"
         self._slowdown_skip_counts[counter_key] += 1
         if self._slowdown_skip_counts[counter_key] % self._slowdown_skip_log_every != 0:
@@ -840,16 +920,24 @@ class GpuWorker(BaseWorker):
             f"🛑 [WorkerSlowdownSkip] partition={self.partition_id}, device_id={self.device_id}, "
             f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
             f"local_step={local_step}, global_step={global_step}, "
-            f"reason={reason}{suffix}"
+            f"window={window_state.get('label')}, reason={reason}{suffix}"
         )
 
     def should_inject_task_slowdown(self, task: 'GpuTask') -> bool:
-        if self.slowdown_factor is None:
-            self._log_slowdown_skip(task, "missing_factor")
-            return False
-        if float(self.slowdown_factor) <= 1.0:
-            self._log_slowdown_skip(task, "non_positive_factor", f"factor={self.slowdown_factor}")
-            return False
+        if self.slowdown_mode == "fixed":
+            if self.slowdown_fixed_ms is None:
+                self._log_slowdown_skip(task, "missing_fixed_ms")
+                return False
+            if float(self.slowdown_fixed_ms) <= 0.0:
+                self._log_slowdown_skip(task, "non_positive_fixed_ms", f"fixed_ms={self.slowdown_fixed_ms}")
+                return False
+        else:
+            if self.slowdown_factor is None:
+                self._log_slowdown_skip(task, "missing_factor")
+                return False
+            if float(self.slowdown_factor) <= 1.0:
+                self._log_slowdown_skip(task, "non_positive_factor", f"factor={self.slowdown_factor}")
+                return False
         if not self._is_target_slowdown_gpu():
             self._log_slowdown_skip(
                 task,
@@ -864,18 +952,28 @@ class GpuWorker(BaseWorker):
                 f"configured_scope={self.slowdown_task_scope}"
             )
             return False
-        if not self._is_in_slowdown_window(task):
+        window_state = self._capture_task_slowdown_window_state(task)
+        if not window_state.get("in_window", False):
             self._log_slowdown_skip(
                 task,
                 "outside_window",
-                f"range=({self.slowdown_start}, {self.slowdown_end})"
+                window_state.get("label")
             )
             return False
         return True
 
     def get_task_injected_sleep_sec(self, task: 'GpuTask') -> float:
+        setattr(task, "_worker_slowdown_injection_applied", False)
         if not self.should_inject_task_slowdown(task):
             return 0.0
+
+        if self.slowdown_mode == "fixed":
+            fixed_ms = float(self.slowdown_fixed_ms or 0.0)
+            if fixed_ms <= 0.0:
+                self._log_slowdown_skip(task, "zero_fixed_sleep", f"fixed_ms={fixed_ms:.2f}")
+                return 0.0
+            setattr(task, "_worker_slowdown_injection_applied", True)
+            return fixed_ms / 1000.0
 
         key = self._task_baseline_key(task)
         if key is None:
@@ -901,6 +999,7 @@ class GpuWorker(BaseWorker):
                 f"baseline_key={key}, baseline_ms={base_ms:.2f}, factor={factor:.2f}"
             )
             return 0.0
+        setattr(task, "_worker_slowdown_injection_applied", True)
         return extra_ms / 1000.0
 
     def update_task_baseline(self, task: 'GpuTask', elapsed_ms: float):
@@ -936,13 +1035,14 @@ class GpuWorker(BaseWorker):
         scope = self._task_scope_of(task)
         key = self._task_baseline_key(task)
         baseline_ms = self._task_baseline_ms.get(key, -1.0) if key else -1.0
+        window_state = self._capture_task_slowdown_window_state(task)
 
         Log.i(
             f"🧪 [WorkerSlowdown] partition={self.partition_id}, device_id={self.device_id}, "
             f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
             f"local_step={self._task_local_step(task)}, global_step={self._task_global_step(task)}, "
-            f"baseline_ms={baseline_ms:.2f}, factor={self.slowdown_factor}, "
-            f"sleep_ms={sleep_sec * 1000.0:.2f}"
+            f"mode={self.slowdown_mode}, baseline_ms={baseline_ms:.2f}, factor={self.slowdown_factor}, fixed_ms={self.slowdown_fixed_ms}, "
+            f"window={window_state.get('label')}, sleep_ms={sleep_sec * 1000.0:.2f}"
         )
     def join(self):
         # 헬스체크 중지

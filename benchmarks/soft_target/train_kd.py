@@ -91,10 +91,18 @@ parser.add_argument('--dryrun-failover-cycle', action='store_true', default=Fals
 parser.add_argument('--failover-inject-scenario', type=str, default='',
                     help='Inject synthetic slowdown scenario (e.g., KEEP_REPLAN_DEGRADE) for testing failover policies')
 parser.add_argument('--inject-slowdown-gpu', type=int, default=None, help='GPU index to inject slowdown (relative to CUDA_VISIBLE_DEVICES)')
+parser.add_argument('--slowdown-mode', type=str, default='ratio', choices=['ratio', 'fixed'],
+                    help='Synthetic slowdown mode: ratio (baseline-scaled) or fixed (constant sleep)')
 parser.add_argument('--slowdown-factor', type=float, default=None, help='Slowdown factor (e.g., 1.5 for 1.5x slower)')
+parser.add_argument('--slowdown-fixed-ms', type=float, default=None,
+                    help='Fixed sleep time per task in ms when --slowdown-mode=fixed (e.g., 50)')
 parser.add_argument('--slowdown-duration', type=int, default=None, help='Number of steps to inject slowdown (default: scenario-specific)')
 parser.add_argument('--slowdown-start', type=int, default=None, help='Start step for slowdown injection (default: scenario-specific)')
 parser.add_argument('--slowdown-end', type=int, default=None, help='End step for slowdown injection (default: scenario-specific)')
+parser.add_argument('--slowdown-warmup-sec', type=float, default=None,
+                    help='Warm-up duration before wall-clock slowdown injection starts')
+parser.add_argument('--slowdown-duration-sec', type=float, default=None,
+                    help='Wall-clock duration for slowdown injection after warm-up')
 parser.add_argument('--slowdown-task-scope', type=str, default='compute',
                     choices=['compute', 'comm', 'both'],
                     help='Inject slowdown inside worker task path: compute / comm / both')
@@ -142,6 +150,53 @@ def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
             return value
     logging.error(f"🔍 Failed to extract {name} from unparsed_args: {unparsed_args}")
     return None
+
+
+def _validate_slowdown_cli_args():
+    uses_step_window = (
+        args.slowdown_start is not None or
+        args.slowdown_end is not None or
+        args.slowdown_duration is not None
+    )
+    uses_time_window = (
+        args.slowdown_warmup_sec is not None or
+        args.slowdown_duration_sec is not None
+    )
+
+    if uses_time_window:
+        if args.slowdown_warmup_sec is None or args.slowdown_duration_sec is None:
+            raise ValueError(
+                "Both --slowdown-warmup-sec and --slowdown-duration-sec must be provided together."
+            )
+        if float(args.slowdown_warmup_sec) < 0.0:
+            raise ValueError(
+                f"--slowdown-warmup-sec must be >= 0, got {args.slowdown_warmup_sec}"
+            )
+        if float(args.slowdown_duration_sec) <= 0.0:
+            raise ValueError(
+                f"--slowdown-duration-sec must be > 0, got {args.slowdown_duration_sec}"
+            )
+
+    if uses_step_window and uses_time_window:
+        raise ValueError(
+            "Step-based slowdown (--slowdown-start/--slowdown-end/--slowdown-duration) "
+            "cannot be combined with wall-clock slowdown "
+            "(--slowdown-warmup-sec/--slowdown-duration-sec)."
+        )
+
+    if args.slowdown_mode == 'fixed':
+        if args.slowdown_fixed_ms is None:
+            raise ValueError(
+                "--slowdown-mode=fixed requires --slowdown-fixed-ms to be set."
+            )
+        if float(args.slowdown_fixed_ms) <= 0.0:
+            raise ValueError(
+                f"--slowdown-fixed-ms must be > 0, got {args.slowdown_fixed_ms}"
+            )
+    elif args.slowdown_fixed_ms is not None and float(args.slowdown_fixed_ms) <= 0.0:
+        raise ValueError(
+            f"--slowdown-fixed-ms must be > 0 when provided, got {args.slowdown_fixed_ms}"
+        )
 
 
 def _latest_failover_coeff_path(save_root: str) -> str:
@@ -627,6 +682,7 @@ def dummy_target_update(m, online_new_param: Optional[Iterable[torch.Tensor]],
 
 def main():
     global niter, _resume_target_epoch, _resume_batches_to_skip
+    _validate_slowdown_cli_args()
     logging.info("args = %s", args)
     logging.info("unparsed_args = %s", unparsed)
 
@@ -1317,7 +1373,7 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
 
             if wall_triggered:
                 preferred_gpu = None
-                if args.inject_slowdown_gpu is not None and args.slowdown_factor is not None:
+                if args.inject_slowdown_gpu is not None:
                     preferred_gpu = int(args.inject_slowdown_gpu)
 
                 try:

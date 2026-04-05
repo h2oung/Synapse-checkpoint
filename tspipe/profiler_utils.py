@@ -4,6 +4,7 @@ from threading import Thread
 from queue import Queue
 from collections import defaultdict, deque
 import json
+import os
 import pynvml as nvml
 import time
 import threading
@@ -142,17 +143,67 @@ class GpuTaskProfiler:
 
 
 gpu_task_profiler_instance: Optional[GpuTaskProfiler] = None
+gpu_util_sampler_instance: Optional["GpuUtilSampler"] = None
 
 
 def init_gpu_task_profiler(*args, **kwargs):
-    global gpu_task_profiler_instance
+    global gpu_task_profiler_instance, gpu_util_sampler_instance
     gpu_task_profiler_instance = GpuTaskProfiler(*args, **kwargs)
+    if gpu_util_sampler_instance is None:
+        gpu_util_sampler_instance = GpuUtilSampler()
+        gpu_util_sampler_instance.start()
 
 
 def stop_gpu_task_profiler():
-    global gpu_task_profiler_instance
+    global gpu_task_profiler_instance, gpu_util_sampler_instance
     if gpu_task_profiler_instance is not None:
         gpu_task_profiler_instance.stop()
+        gpu_task_profiler_instance = None
+    if gpu_util_sampler_instance is not None:
+        gpu_util_sampler_instance.stop()
+        gpu_util_sampler_instance = None
+
+
+def _parse_visible_device_tokens():
+    visible_devices = os.environ.get("CUDA_VISIBLE_DEVICES")
+    if not visible_devices:
+        return None
+
+    tokens = [token.strip() for token in visible_devices.split(",")]
+    return [token for token in tokens if token]
+
+
+def _resolve_visible_cuda_index(ctx, fallback_device_id):
+    worker = getattr(ctx, "worker", None)
+    internal_device_id = getattr(worker, "internal_device_id", None)
+    if internal_device_id is not None:
+        return internal_device_id
+    if fallback_device_id is not None:
+        return fallback_device_id
+    try:
+        return torch.cuda.current_device()
+    except Exception:
+        return None
+
+
+def _resolve_nvml_device_index(ctx, fallback_device_id):
+    visible_cuda_index = _resolve_visible_cuda_index(ctx, fallback_device_id)
+    if visible_cuda_index is None:
+        return None
+
+    visible_tokens = _parse_visible_device_tokens()
+    if visible_tokens is None:
+        return visible_cuda_index
+
+    if visible_cuda_index >= len(visible_tokens):
+        return None
+
+    token = visible_tokens[visible_cuda_index]
+    if token.isdigit():
+        return int(token)
+
+    # Avoid silently sampling the wrong GPU when CUDA_VISIBLE_DEVICES uses UUID/MIG tokens.
+    return None
 
 
 def _consume_profile_extra(ctx):
@@ -173,7 +224,7 @@ def _consume_profile_extra(ctx):
     return out
 
 
-def create_compute_profile_hooks(task_name, task_fn):
+def create_compute_profile_hooks(task_name, task_fn, record_gpu_util=True):
     def wrapped_fn(ctx, task):
         if not hasattr(wrapped_fn, "nvml_initialized"):
             nvml.nvmlInit()
@@ -207,7 +258,8 @@ def create_compute_profile_hooks(task_name, task_fn):
         end_evt.record()
         torch.cuda.synchronize()
 
-        wall_ms = (time.time() - wall_start) * 1000.0
+        wall_end = time.time()
+        wall_ms = (wall_end - wall_start) * 1000.0
         cuda_ms = start_evt.elapsed_time(end_evt)
 
         extra = _consume_profile_extra(ctx)
@@ -231,12 +283,36 @@ def create_compute_profile_hooks(task_name, task_fn):
         gpu_util = None
         power_w = None
         power_limit_w = None
+        nvml_device_index = _resolve_nvml_device_index(ctx, device_id)
 
-        if device_id is not None and device_id < len(wrapped_fn.gpu_handles):
-            handle = wrapped_fn.gpu_handles[device_id]
-            util = nvml.nvmlDeviceGetUtilizationRates(handle)
-            gpu_util = util.gpu
-            power_w = nvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
+        if (
+            gpu_util_sampler_instance is not None
+            and nvml_device_index is not None
+        ):
+            # Figure-facing GPU utilization should reflect the whole task window,
+            # not a single instantaneous NVML sample at task completion.
+            if record_gpu_util:
+                gpu_util = gpu_util_sampler_instance.get_average_util(
+                    nvml_device_index,
+                    wall_start,
+                    wall_end,
+                )
+            power_w = gpu_util_sampler_instance.get_average_power(
+                nvml_device_index,
+                wall_start,
+                wall_end,
+            )
+
+        if (
+            nvml_device_index is not None
+            and nvml_device_index < len(wrapped_fn.gpu_handles)
+        ):
+            handle = wrapped_fn.gpu_handles[nvml_device_index]
+            if record_gpu_util and gpu_util is None:
+                util = nvml.nvmlDeviceGetUtilizationRates(handle)
+                gpu_util = util.gpu
+            if power_w is None:
+                power_w = nvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
             power_limit_w = nvml.nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
 
         if gpu_task_profiler_instance is not None:
@@ -272,31 +348,46 @@ class GpuUtilSampler:
         self.interval = interval
         self.running = False
         self.data = deque(maxlen=maxlen)
-        self.thread = threading.Thread(target=self._run, daemon=True)
+        self.lock = threading.Lock()
+        self.thread = None
         nvml.nvmlInit()
         self.handles = [nvml.nvmlDeviceGetHandleByIndex(i) for i in range(nvml.nvmlDeviceGetCount())]
 
     def _run(self):
         while self.running:
             timestamp = time.time()
+            samples = []
             for i, handle in enumerate(self.handles):
                 util = nvml.nvmlDeviceGetUtilizationRates(handle)
                 power = nvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
-                self.data.append((timestamp, i, util.gpu, power))
+                samples.append((timestamp, i, util.gpu, power))
+            with self.lock:
+                self.data.extend(samples)
             time.sleep(self.interval)
 
     def start(self):
+        if self.running:
+            return
         self.running = True
+        self.thread = threading.Thread(target=self._run, daemon=True)
         self.thread.start()
 
     def stop(self):
+        if not self.running:
+            return
         self.running = False
-        self.thread.join()
+        if self.thread is not None:
+            self.thread.join()
+            self.thread = None
 
     def get_average_util(self, device_id, start, end):
-        samples = [u for t, i, u, _ in self.data if i == device_id and start <= t <= end]
-        return sum(samples) / len(samples) if samples else 0.0
+        with self.lock:
+            snapshot = list(self.data)
+        samples = [u for t, i, u, _ in snapshot if i == device_id and start <= t <= end]
+        return sum(samples) / len(samples) if samples else None
 
     def get_average_power(self, device_id, start, end):
-        samples = [p for t, i, _, p in self.data if i == device_id and start <= t <= end]
-        return sum(samples) / len(samples) if samples else 0.0
+        with self.lock:
+            snapshot = list(self.data)
+        samples = [p for t, i, _, p in snapshot if i == device_id and start <= t <= end]
+        return sum(samples) / len(samples) if samples else None
