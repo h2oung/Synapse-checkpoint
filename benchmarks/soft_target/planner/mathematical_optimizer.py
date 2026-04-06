@@ -169,9 +169,16 @@ class MathematicalFailoverOptimizer:
         """Build restart config payload from the latest partition/coefficient state."""
         step_id = 0
         t_base = 0.0
+        c_load = 4.37
+        d_replan = 14.0
+        r_replan = 50.0
         if self.use_mathematical_model:
             step_id = int(self.progress_tracker.progress.current_step)
-            t_base = float(self.policy_selector.eta_calculator.restart_costs.T_base)
+            costs = self.policy_selector.eta_calculator.restart_costs
+            t_base = float(costs.T_base)
+            c_load = float(costs.C_load)
+            d_replan = float(costs.D_replan)
+            r_replan = float(costs.R_replan)
 
         active_gpus = [int(g) for g in self.current_partition.gpu_assignment]
         alpha_to_save = {
@@ -197,9 +204,9 @@ class MathematicalFailoverOptimizer:
             "alpha_comp": alpha_to_save,
             "beta_comm": beta_to_save,
             "restart_overhead": {
-                "formula": "4.37 + 50 * T_base",
+                "formula": "C_load + D_replan + R_replan * T_base",
                 "t_base": t_base,
-                "value": float(4.37 + 50.0 * t_base),
+                "value": float(c_load + d_replan + r_replan * t_base),
             },
         }
         return payload
@@ -416,7 +423,6 @@ class MathematicalFailoverOptimizer:
         if not self.use_mathematical_model:
             return
 
-        current = self.policy_selector.eta_calculator.restart_costs
         t_base = self._estimate_baseline_step_time()
 
         # Guardrail: keep T_base in a realistic step-time range (seconds).
@@ -430,12 +436,20 @@ class MathematicalFailoverOptimizer:
                 self.logger.warning(f"Invalid FAILOVER_FORCE_T_BASE_SEC={force_t_base}, ignoring")
         t_base = max(0.05, min(5.0, float(t_base)))
 
+        # Conservative defaults from observed restart downtime (~28-30s).
+        # Keep env overrides for low-risk tuning during paper prep.
+        c_load = float(os.environ.get("FAILOVER_RESTART_C_LOAD_SEC", "4.37"))
+        d_replan = float(os.environ.get("FAILOVER_RESTART_D_REPLAN_SEC", "14.0"))
+        d_degrade = float(os.environ.get("FAILOVER_RESTART_D_DEGRADE_SEC", "10.0"))
+        r_replan = float(os.environ.get("FAILOVER_RESTART_R_REPLAN", "50.0"))
+        r_degrade = float(os.environ.get("FAILOVER_RESTART_R_DEGRADE", "50.0"))
+
         updated = RestartCosts(
-            C_load=4.37,
-            D_replan=0.0,
-            D_degrade=0.0,
-            R_replan=50.0,
-            R_degrade=50.0,
+            C_load=c_load,
+            D_replan=d_replan,
+            D_degrade=d_degrade,
+            R_replan=r_replan,
+            R_degrade=r_degrade,
             T_base=t_base,
             T_opt_K=0.0,
             T_opt_K_minus_1=0.0,
@@ -472,7 +486,7 @@ class MathematicalFailoverOptimizer:
 
         costs = self.policy_selector.eta_calculator.restart_costs
         t_base = float(costs.T_base)
-        replan_overhead = 4.37 + 50.0 * t_base
+        replan_overhead = costs.C_load + costs.D_replan + costs.R_replan * t_base
 
         # DEGRADE 정책: 현재 gpu_assignment과 일치하는 alpha/beta만 저장
         alpha_to_save = self.alpha_g
@@ -506,10 +520,11 @@ class MathematicalFailoverOptimizer:
                 "delta_keep_minus_replan": float(eta_keep - eta_replan),
             },
             "replan_overhead": {
-                "formula": "4.37 + 50 * T_base",
+                "formula": "C_load + D_replan + R_replan * T_base",
                 "value": float(replan_overhead),
-                "c_load": 4.37,
-                "rollback_steps": 50,
+                "c_load": float(costs.C_load),
+                "d_replan": float(costs.D_replan),
+                "r_replan": float(costs.R_replan),
                 "t_base": t_base,
             },
             "reasoning": reasoning,
@@ -832,8 +847,8 @@ class MathematicalFailoverOptimizer:
         # 측정된 비용을 RestartCosts 객체로 변환
         restart_costs = RestartCosts(
             C_load=measured_costs.get('checkpoint_load_time', 4.37),
-            D_replan=measured_costs.get('replan_time', 0.0),
-            D_degrade=measured_costs.get('degrade_time', 0.0),
+            D_replan=measured_costs.get('replan_time', 14.0),
+            D_degrade=measured_costs.get('degrade_time', 10.0),
             R_replan=measured_costs.get('replan_factor', 50.0),
             R_degrade=measured_costs.get('degrade_factor', 50.0),
             T_base=measured_costs.get('base_stage_time', 1.0),

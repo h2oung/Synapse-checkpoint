@@ -98,6 +98,23 @@ def maybe_inject_worker_slowdown(ctx: 'GpuTaskContext', task: 'GpuTask'):
     _acc_profile_extra(ctx, "injected_sleep_ms", sleep_sec * 1000.0)
     worker.log_task_slowdown_injection(task, sleep_sec)
 
+
+def resolve_task_global_step(ctx: 'GpuTaskContext', task: 'GpuTask') -> int:
+    worker = getattr(ctx, "worker", None)
+    if worker is not None and hasattr(worker, "_task_global_step"):
+        try:
+            return int(worker._task_global_step(task))
+        except Exception:
+            pass
+
+    if task.batch_id is None:
+        return 0
+    return max(int(task.batch_id) - 1, 0)
+
+
+def resolve_task_global_batch_id(ctx: 'GpuTaskContext', task: 'GpuTask') -> int:
+    return resolve_task_global_step(ctx, task) + 1
+
 def issue_tensor_uuid() -> int:
     global global_tensor_uuid_count
     global_tensor_uuid_count += 1
@@ -771,12 +788,27 @@ def copy_model(ctx: 'GpuTaskContext', task: 'GpuTask'):
 
     if ctx.config['train']['save_model_every_iter'] > 0:
         if task.batch_id % ctx.config['train']['save_model_every_iter'] == 0 and task.is_target:
-            Log.i(f"Saving model at batch {task.batch_id}")
-            destination = f"{ctx.config['__artifact_dir']}/model_batch{task.batch_id}_part{task.partition_id}.pt"
+            global_batch_id = resolve_task_global_batch_id(ctx, task)
+            global_step = resolve_task_global_step(ctx, task)
+            if global_batch_id != int(task.batch_id):
+                Log.i(
+                    f"Saving model at local batch {task.batch_id} "
+                    f"(global batch {global_batch_id})"
+                )
+            else:
+                Log.i(f"Saving model at batch {task.batch_id}")
+
+            destination = (
+                f"{ctx.config['__artifact_dir']}/model_batch{global_batch_id}_part"
+                f"{task.partition_id}.pt"
+            )
             torch.save({
                 'online_network_state_dict': ctx.partition_online.state_dict(),
                 'target_network_state_dict': model.state_dict(),
-                'optimizer_state_dict': ctx.optimizer.state_dict()
+                'optimizer_state_dict': ctx.optimizer.state_dict(),
+                'local_batch_id': int(task.batch_id),
+                'global_batch_id': int(global_batch_id),
+                'global_step': int(global_step),
             }, destination)
 
     if task.is_target:

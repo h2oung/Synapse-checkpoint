@@ -6,6 +6,7 @@ ETA (Estimated Time to Arrival) Calculator
 목표: p* = argmin ETA(p) for p in {KEEP, REPLAN, DEGRADE}
 """
 import time
+import os
 import logging
 from typing import Dict, List, Tuple, Optional
 from dataclasses import dataclass
@@ -139,13 +140,21 @@ class ETACalculator:
 
 def create_default_restart_costs() -> RestartCosts:
     """기본값 기반 RestartCosts 생성 (논문 실험용 초기값)"""
+    c_load = float(os.environ.get("FAILOVER_RESTART_C_LOAD_SEC", "4.37"))
+    d_replan = float(os.environ.get("FAILOVER_RESTART_D_REPLAN_SEC", "14.0"))
+    d_degrade = float(os.environ.get("FAILOVER_RESTART_D_DEGRADE_SEC", "10.0"))
+    r_replan = float(os.environ.get("FAILOVER_RESTART_R_REPLAN", "50.0"))
+    r_degrade = float(os.environ.get("FAILOVER_RESTART_R_DEGRADE", "50.0"))
+
     return RestartCosts(
-        # 0-B 실험 기준: REPLAN restart = 4.37s + 50 * baseline_step_time
-        C_load=4.37,
-        D_replan=0.0,
-        D_degrade=0.0,
-        R_replan=50.0,
-        R_degrade=50.0,
+        # Conservative default tuned from recent logs:
+        # observed restart downtime was ~28-30s around REPLAN.
+        # Keep 50*T_base term for scale adaptation and add fixed repartition constants.
+        C_load=c_load,
+        D_replan=d_replan,
+        D_degrade=d_degrade,
+        R_replan=r_replan,
+        R_degrade=r_degrade,
         T_base=1.0,
         T_opt_K=0.0,
         T_opt_K_minus_1=0.0,

@@ -7,6 +7,7 @@ Dynamic Policy Selector
 import os
 import time
 import logging
+import math
 from typing import Dict, List, Optional
 from dataclasses import dataclass, field
 from .eta_calculator import ETACalculator, RestartCosts, Policy, create_default_restart_costs
@@ -66,6 +67,32 @@ class DynamicPolicySelector:
         self.sustained_slowdown_duration = float(threshold_str) if threshold_str else 30.0
         if threshold_str and float(threshold_str) > 0:
             self.logger.info(f"🧪 Slowdown duration threshold overridden: {self.sustained_slowdown_duration}s")
+
+        # REPLAN guardrail: require minimum ETA gain over modeled restart overhead.
+        # This is intentionally conservative to avoid loss-making REPLAN triggers.
+        self.replan_min_gain_margin = float(
+            os.environ.get("FAILOVER_REPLAN_MIN_GAIN_MARGIN", "1.2")
+        )
+        self.replan_fallback_restart_sec = float(
+            os.environ.get("FAILOVER_REPLAN_FALLBACK_RESTART_SEC", "30.0")
+        )
+        # Optional weak late-stage bias: disabled by default for simpler interpretation.
+        self.enable_late_stage_replan_bias = os.environ.get(
+            "FAILOVER_ENABLE_LATE_STAGE_REPLAN_BIAS", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.late_stage_replan_bias_threshold = float(
+            os.environ.get("FAILOVER_LATE_STAGE_REPLAN_BIAS_THRESHOLD", "0.90")
+        )
+        self.late_stage_replan_margin_multiplier = float(
+            os.environ.get("FAILOVER_LATE_STAGE_REPLAN_MARGIN_MULTIPLIER", "1.0")
+        )
+        # Keep this off by default to avoid extra confounders during paper deadline runs.
+        self.enable_late_stage_force_keep = os.environ.get(
+            "FAILOVER_ENABLE_LATE_STAGE_FORCE_KEEP", "0"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self.late_stage_force_keep_threshold = float(
+            os.environ.get("FAILOVER_LATE_STAGE_FORCE_KEEP_THRESHOLD", "0.95")
+        )
 
         # Timing
         self.last_eta_compute_ms: Optional[float] = None
@@ -197,15 +224,52 @@ class DynamicPolicySelector:
         """ETA 결과 분석 및 결정 검증"""
         optimal_policy = eta_result.optimal_policy
         eta_values = eta_result.eta_values
+        replan_guardrail_applied = False
+
+        # Low-risk guardrail: REPLAN only when ETA gain clearly exceeds restart overhead.
+        # This suppresses loss-making REPLAN decisions when the cost model is optimistic.
+        if optimal_policy == Policy.REPLAN:
+            eta_keep = float(eta_values.get(Policy.KEEP, float("inf")))
+            eta_replan = float(eta_values.get(Policy.REPLAN, float("inf")))
+            expected_gain = eta_keep - eta_replan
+
+            modeled_restart_cost = self._estimate_replan_restart_cost(eta_result)
+            effective_margin = self.replan_min_gain_margin
+
+            if self.enable_late_stage_replan_bias and self.progress_tracker.is_late_stage(self.late_stage_replan_bias_threshold):
+                effective_margin *= self.late_stage_replan_margin_multiplier
+
+            required_gain = modeled_restart_cost * effective_margin
+            if expected_gain <= required_gain:
+                eta_result.optimal_policy = Policy.KEEP
+                optimal_policy = Policy.KEEP
+                replan_guardrail_applied = True
         
         # 신뢰도 계산
         confidence_score = self._calculate_confidence(eta_result, K_rem, current_slowdown)
         
         # 결정 논리 생성
         reasoning = self._generate_reasoning(eta_result, K_rem, current_slowdown)
+
+        if replan_guardrail_applied:
+            # Append guardrail trace when KEEP is selected by REPLAN gain gate.
+            eta_keep = float(eta_values.get(Policy.KEEP, float("inf")))
+            eta_replan = float(eta_values.get(Policy.REPLAN, float("inf")))
+            expected_gain = eta_keep - eta_replan
+            modeled_restart_cost = self._estimate_replan_restart_cost(eta_result)
+            effective_margin = self.replan_min_gain_margin
+            if self.enable_late_stage_replan_bias and self.progress_tracker.is_late_stage(self.late_stage_replan_bias_threshold):
+                effective_margin *= self.late_stage_replan_margin_multiplier
+            required_gain = modeled_restart_cost * effective_margin
+            if expected_gain <= required_gain:
+                reasoning += (
+                    f" [REPLAN guardrail: gain={expected_gain:.1f}s <= "
+                    f"required={required_gain:.1f}s (restart={modeled_restart_cost:.1f}s, "
+                    f"margin={effective_margin:.2f}) -> KEEP]"
+                )
         
         # 특수 상황 처리
-        if self.progress_tracker.is_late_stage(0.95):  # 95% 완료 시
+        if self.enable_late_stage_force_keep and self.progress_tracker.is_late_stage(self.late_stage_force_keep_threshold):
             if optimal_policy == Policy.REPLAN:
                 reasoning += " [Late-stage: REPLAN cost too high, forcing KEEP]"
                 optimal_policy = Policy.KEEP
@@ -220,6 +284,31 @@ class DynamicPolicySelector:
             context_info=context_info,
             reasoning=reasoning
         )
+
+    def _estimate_replan_restart_cost(self, eta_result) -> float:
+        """Estimate restart overhead used by REPLAN gating.
+
+        Preference order:
+        1) ETA breakdown restart_cost_replan (if finite, >0)
+        2) Current RestartCosts model
+        3) Conservative fallback (env-configurable)
+        """
+        breakdown = getattr(eta_result, "costs_breakdown", {}) or {}
+        restart_cost = float(breakdown.get("restart_cost_replan", 0.0) or 0.0)
+        if math.isfinite(restart_cost) and restart_cost > 0:
+            return restart_cost
+
+        costs = self.eta_calculator.restart_costs
+        modeled = float(
+            costs.C_load
+            + costs.D_replan
+            + costs.R_replan * costs.T_base
+            + costs.T_opt_K
+        )
+        if math.isfinite(modeled) and modeled > 0:
+            return modeled
+
+        return max(0.0, self.replan_fallback_restart_sec)
     
     def _calculate_confidence(self, eta_result, K_rem: int, current_slowdown: float) -> float:
         """결정에 대한 신뢰도 계산 (0.0 ~ 1.0)"""

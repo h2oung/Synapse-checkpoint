@@ -50,11 +50,15 @@ class GpuTaskProfiler:
         sync_wait_ms=None,
         injected_sleep_ms=None,
         exec_wall_ms=None,
+        global_step=None,
+        global_batch_id=None,
     ):
         record = {
             "task_name": task_name,
             "device": device_id,
             "batch_id": batch_id,
+            "global_step": global_step,
+            "global_batch_id": global_batch_id,
             "ubatch_id": ubatch_id,
             "partition": partition_id,
             "target": is_target,
@@ -91,20 +95,57 @@ class GpuTaskProfiler:
         self.queue.put("STOP")
         self.thread.join()
 
+    def _load_trace_records(self):
+        if not self.trace_file.exists():
+            return list(self.records)
+
+        records = []
+        with open(self.trace_file, "r") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    records.append(json.loads(line))
+                except json.JSONDecodeError:
+                    continue
+        return records
+
     def _save_summary(self):
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        all_records = self._load_trace_records()
         with open(self.output_file, "w") as f:
             by_step = defaultdict(list)
-            for r in self.records:
-                by_step[r["batch_id"]].append(r)
+            for r in all_records:
+                step_key = r.get("global_batch_id")
+                if step_key is None:
+                    step_key = r.get("batch_id")
+                by_step[step_key].append(r)
 
             for step, records in sorted(by_step.items()):
                 f.write(f"\n====== Step {step} ======\n")
                 for r in records:
+                    global_batch_id = r.get("global_batch_id")
+                    local_batch_id = r.get("batch_id")
+                    global_step = r.get("global_step")
+
                     line = (
                         f"[GPU {r.get('device')}] "
                         f"Task={r.get('task_name', ''):<20} | "
-                        f"Batch={r.get('batch_id')} "
+                    )
+
+                    if global_batch_id is not None and global_batch_id != local_batch_id:
+                        line += (
+                            f"GlobalBatch={global_batch_id} "
+                            f"LocalBatch={local_batch_id} "
+                        )
+                    else:
+                        line += f"Batch={local_batch_id} "
+
+                    if global_step is not None:
+                        line += f"GlobalStep={global_step} "
+
+                    line += (
                         f"UBatch={r.get('ubatch_id')} | "
                         f"Partition={r.get('partition')} "
                         f"Target={r.get('target')} | "
@@ -315,6 +356,17 @@ def create_compute_profile_hooks(task_name, task_fn, record_gpu_util=True):
                 power_w = nvml.nvmlDeviceGetPowerUsage(handle) / 1000.0
             power_limit_w = nvml.nvmlDeviceGetPowerManagementLimit(handle) / 1000.0
 
+        global_step = None
+        global_batch_id = None
+        worker = getattr(ctx, "worker", None)
+        if worker is not None and hasattr(worker, "_task_global_step"):
+            try:
+                global_step = int(worker._task_global_step(task))
+                global_batch_id = int(global_step) + 1
+            except Exception:
+                global_step = None
+                global_batch_id = None
+
         if gpu_task_profiler_instance is not None:
             gpu_task_profiler_instance.log(
                 task_name=task_name,
@@ -336,6 +388,8 @@ def create_compute_profile_hooks(task_name, task_fn, record_gpu_util=True):
                 gpu_util=gpu_util,
                 power_w=power_w,
                 power_limit_w=power_limit_w,
+                global_step=global_step,
+                global_batch_id=global_batch_id,
             )
 
         return result

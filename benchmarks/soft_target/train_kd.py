@@ -11,9 +11,9 @@ import sys
 import time
 import yaml
 from functools import partial
-from itertools import chain, islice
+from itertools import chain
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Iterable, List, Optional
 
 import numpy as np
 import torch
@@ -134,6 +134,71 @@ torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 np.random.seed(random_seed)
 random.seed(random_seed)
+
+
+class _ResumeAwareBatchSampler(torch.utils.data.Sampler[List[int]]):
+    """Build deterministic epoch batches and jump directly to a batch offset."""
+
+    def __init__(
+        self,
+        dataset_len: int,
+        batch_size: int,
+        epoch: int,
+        *,
+        start_batch: int = 0,
+        max_batches: int = 0,
+        shuffle: bool = True,
+        drop_last: bool = True,
+        seed: int = 0,
+    ):
+        self.dataset_len = int(dataset_len)
+        self.batch_size = max(1, int(batch_size))
+        self.epoch = int(epoch)
+        self.start_batch = max(0, int(start_batch))
+        self.max_batches = int(max_batches)
+        self.shuffle = bool(shuffle)
+        self.drop_last = bool(drop_last)
+        self.seed = int(seed)
+
+        if self.drop_last:
+            self.total_batches = self.dataset_len // self.batch_size
+        else:
+            self.total_batches = (self.dataset_len + self.batch_size - 1) // self.batch_size
+
+        if self.max_batches > 0:
+            self.effective_total = min(self.total_batches, self.max_batches)
+        else:
+            self.effective_total = self.total_batches
+
+        self.start_batch = min(self.start_batch, self.effective_total)
+
+    def _build_epoch_indices(self) -> List[int]:
+        if self.shuffle:
+            generator = torch.Generator()
+            generator.manual_seed(self.seed + max(0, self.epoch - 1))
+            indices = torch.randperm(self.dataset_len, generator=generator).tolist()
+        else:
+            indices = list(range(self.dataset_len))
+
+        if self.drop_last:
+            usable = self.total_batches * self.batch_size
+            indices = indices[:usable]
+
+        return indices
+
+    def __iter__(self):
+        indices = self._build_epoch_indices()
+        for batch_idx in range(self.start_batch, self.effective_total):
+            start = batch_idx * self.batch_size
+            end = start + self.batch_size
+            batch = indices[start:end]
+            if len(batch) < self.batch_size and self.drop_last:
+                break
+            if batch:
+                yield batch
+
+    def __len__(self) -> int:
+        return max(0, self.effective_total - self.start_batch)
 
 
 def _extract_cli_option(unparsed_args, name: str) -> Optional[str]:
@@ -598,10 +663,45 @@ def _prepare_epoch_iterator(train_loader, epoch: int, max_steps_per_epoch: int =
     resume_offset = 0
     if epoch == _resume_target_epoch and _resume_batches_to_skip > 0:
         resume_offset = min(int(_resume_batches_to_skip), effective_total)
-        # The offset is consumed by slicing the DataLoader for this epoch.
         _resume_batches_to_skip = 0
 
-    return islice(train_loader, resume_offset, effective_total), resume_offset, effective_total
+    batch_sampler = _ResumeAwareBatchSampler(
+        dataset_len=len(train_loader.dataset),
+        batch_size=int(train_loader.batch_size),
+        epoch=epoch,
+        start_batch=resume_offset,
+        max_batches=effective_total,
+        shuffle=True,
+        drop_last=bool(getattr(train_loader, 'drop_last', False)),
+        seed=random_seed,
+    )
+
+    loader_kwargs = {
+        'dataset': train_loader.dataset,
+        'batch_sampler': batch_sampler,
+        'num_workers': train_loader.num_workers,
+        'pin_memory': train_loader.pin_memory,
+        'collate_fn': train_loader.collate_fn,
+    }
+    if train_loader.num_workers > 0:
+        loader_kwargs['persistent_workers'] = getattr(train_loader, 'persistent_workers', False)
+
+    worker_init_fn = getattr(train_loader, 'worker_init_fn', None)
+    if worker_init_fn is not None:
+        loader_kwargs['worker_init_fn'] = worker_init_fn
+
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(random_seed + max(0, epoch - 1))
+    loader_kwargs['generator'] = loader_generator
+
+    if resume_offset > 0:
+        logging.info(
+            f"↪️ Fast resume enabled: seeking directly to batch {resume_offset}/{effective_total} "
+            "without consuming skipped batches from the DataLoader front"
+        )
+
+    epoch_loader = torch.utils.data.DataLoader(**loader_kwargs)
+    return epoch_loader, resume_offset, effective_total
 
 
 def _run_dryrun_failover_cycle():
