@@ -233,6 +233,8 @@ PY
   # Export failover scenario injection if specified (for SlowdownDetector intra-batch slowdown injection)
   # Note: Must re-export here because subprocess env vars don't propagate to script context
   export FAILOVER_INJECT_SCENARIO="${FAILOVER_INJECT_SCENARIO:=}"
+  export FAILOVER_INJECT_GPU="${FAILOVER_INJECT_GPU:=}"
+  export FAILOVER_INJECT_RATIO="${FAILOVER_INJECT_RATIO:=}"
   export FAILOVER_TEST_FAST_GATES="${FAILOVER_TEST_FAST_GATES:=}"
   
   # 기본 slowdown 지속 시간 게이트를 10초로 고정
@@ -250,6 +252,8 @@ PY
   echo "[DEBUG] NCCL PORT: ${_port_base}, RESTART_COUNT: ${RESTART_COUNT}"  # Debug log
   PYTORCH_DISTRIBUTED_NCCL_START_PORT=${_port_base} \
   FAILOVER_INJECT_SCENARIO="${FAILOVER_INJECT_SCENARIO}" \
+  FAILOVER_INJECT_GPU="${FAILOVER_INJECT_GPU}" \
+  FAILOVER_INJECT_RATIO="${FAILOVER_INJECT_RATIO}" \
   FAILOVER_SLOWDOWN_THRESHOLD_SEC="${FAILOVER_SLOWDOWN_THRESHOLD_SEC:-}" \
   FAILOVER_TEST_FAST_GATES="${FAILOVER_TEST_FAST_GATES:-}" \
   python benchmarks/soft_target/train_kd.py \

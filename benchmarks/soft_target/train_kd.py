@@ -13,7 +13,7 @@ import yaml
 from functools import partial
 from itertools import chain
 from pathlib import Path
-from typing import Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 import numpy as np
 import torch
@@ -264,6 +264,61 @@ def _validate_slowdown_cli_args():
         )
 
 
+def _configure_environment_injected_slowdown(total_steps: int) -> None:
+    """Map FAILOVER_* env vars onto the existing TSPipe slowdown knobs."""
+    scenario = os.environ.get("FAILOVER_INJECT_SCENARIO", "").strip().lower()
+    if scenario != "slowdown":
+        return
+
+    target_gpu_raw = os.environ.get("FAILOVER_INJECT_GPU", "").strip()
+    ratio_raw = os.environ.get("FAILOVER_INJECT_RATIO", "").strip()
+    if not target_gpu_raw or not ratio_raw:
+        logging.info(
+            "🧪 FAILOVER slowdown env detected but FAILOVER_INJECT_GPU/FAILOVER_INJECT_RATIO is missing; "
+            "skipping injection config"
+        )
+        return
+
+    try:
+        target_gpu = int(target_gpu_raw)
+        ratio = float(ratio_raw)
+    except ValueError as exc:
+        logging.warning(f"⚠️ Invalid FAILOVER slowdown env values: gpu={target_gpu_raw}, ratio={ratio_raw} ({exc})")
+        return
+
+    if ratio <= 1.0:
+        logging.info(f"🧪 FAILOVER_INJECT_RATIO={ratio:.3f} <= 1.0; skipping slowdown injection")
+        return
+
+    warmup_steps = 50
+    total_steps = max(1, int(total_steps))
+    if warmup_steps >= total_steps:
+        logging.warning(
+            f"⚠️ Warmup step ({warmup_steps}) is not smaller than total_steps ({total_steps}); "
+            "skipping slowdown injection"
+        )
+        return
+
+    args.failover_inject_scenario = "slowdown"
+    args.inject_slowdown_gpu = target_gpu
+    args.slowdown_mode = "ratio"
+    args.slowdown_factor = ratio
+    args.slowdown_start = warmup_steps
+    args.slowdown_end = total_steps
+    args.slowdown_duration = total_steps - warmup_steps
+    args.slowdown_fixed_ms = None
+    args.slowdown_warmup_sec = None
+    args.slowdown_duration_sec = None
+    args.slowdown_task_scope = "compute"
+
+    logging.info(
+        f"🧪 FAILOVER slowdown configured: gpu={target_gpu}, ratio={ratio:.2f}x, "
+        f"warmup={warmup_steps} steps, active_window=[{warmup_steps}, {total_steps})"
+    )
+
+    _validate_slowdown_cli_args()
+
+
 def _latest_failover_coeff_path(save_root: str) -> str:
     return os.path.join(save_root, "alpha_beta_latest.json")
 
@@ -421,6 +476,10 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
             "partition": None,
             "alpha_comp": None,
             "beta_comm": None,
+            "restart_payload": None,
+            "restart_transition": None,
+            "slowdown_detector_state": None,
+            "optimizer_runtime_state": None,
         }
 
     with open(restart_config_path, "r", encoding="utf-8") as f:
@@ -439,6 +498,10 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
             "partition": None,
             "alpha_comp": None,
             "beta_comm": None,
+            "restart_payload": None,
+            "restart_transition": None,
+            "slowdown_detector_state": None,
+            "optimizer_runtime_state": None,
         }
 
     def _infer_layer_count(model) -> int:
@@ -475,6 +538,10 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
                     "partition": None,
                     "alpha_comp": None,
                     "beta_comm": None,
+                    "restart_payload": None,
+                    "restart_transition": None,
+                    "slowdown_detector_state": None,
+                    "optimizer_runtime_state": None,
                 }
 
     # ✅ Apply new partition to YAML if restart payload has one (but skip if already applied in first call)
@@ -520,6 +587,10 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
             "partition": partition_cfg,
             "alpha_comp": None,  # Skip alpha/beta on second call
             "beta_comm": None,
+            "restart_payload": restart_payload,
+            "restart_transition": restart_payload.get("partition_transition"),
+            "slowdown_detector_state": restart_payload.get("slowdown_detector_state"),
+            "optimizer_runtime_state": restart_payload.get("optimizer_runtime_state"),
         }
 
     def _load_state_dict_compat(model, state_dict, model_name: str) -> bool:
@@ -577,6 +648,8 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
     # ✅ NEW: Initialize variables for alpha/beta restoration
     alpha_comp_restored = None
     beta_comm_restored = None
+    slowdown_detector_state = restart_payload.get("slowdown_detector_state")
+    optimizer_runtime_state = restart_payload.get("optimizer_runtime_state")
     
     if os.path.exists(checkpoint_path):
         ckpt = torch.load(checkpoint_path, map_location="cpu")
@@ -590,6 +663,11 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
             except RuntimeError as e:
                 logging.warning(f"Optimizer state mismatch after partition change, skipping: {e}")
         resume_step = int(ckpt.get("global_step", resume_step))
+
+        if slowdown_detector_state is None and "slowdown_detector_state" in ckpt:
+            slowdown_detector_state = ckpt.get("slowdown_detector_state")
+        if optimizer_runtime_state is None and "optimizer_runtime_state" in ckpt:
+            optimizer_runtime_state = ckpt.get("optimizer_runtime_state")
         
         # ✅ NEW: Restore alpha/beta GPU performance coefficients
         if "alpha_comp" in ckpt:
@@ -636,6 +714,10 @@ def _load_failover_bootstrap(save_root: str, unparsed_args, snet, tnet, optimize
         "partition": partition_cfg,
         "alpha_comp": alpha_comp_restored,
         "beta_comm": beta_comm_restored,
+        "restart_payload": restart_payload,
+        "restart_transition": restart_payload.get("partition_transition"),
+        "slowdown_detector_state": slowdown_detector_state,
+        "optimizer_runtime_state": optimizer_runtime_state,
     }
 
 
@@ -703,6 +785,132 @@ def _prepare_epoch_iterator(train_loader, epoch: int, max_steps_per_epoch: int =
     epoch_loader = torch.utils.data.DataLoader(**loader_kwargs)
     return epoch_loader, resume_offset, effective_total
 
+
+
+
+def _partition_config_from_payload(partition_payload: Optional[Dict[str, Any]]) -> Optional[PartitionConfig]:
+    if not isinstance(partition_payload, dict):
+        return None
+    sp = partition_payload.get("snet_partition")
+    tp = partition_payload.get("tnet_partition")
+    if not isinstance(sp, list) or not isinstance(tp, list):
+        return None
+    return PartitionConfig(
+        snet_partition=[int(v) for v in sp],
+        tnet_partition=[int(v) for v in tp],
+        gpu_assignment=[int(v) for v in partition_payload.get("gpu_assignment", list(range(len(sp))))],
+    )
+
+
+def _estimate_restart_detector_baseline_ms(
+    failover_optimizer: Optional[MathematicalFailoverOptimizer],
+    detector_state: Optional[Dict[str, Any]],
+    restart_transition: Optional[Dict[str, Any]],
+) -> Optional[float]:
+    if failover_optimizer is None or not isinstance(detector_state, dict):
+        return None
+
+    baseline_ms = detector_state.get("baseline_stage_time_ms")
+    if baseline_ms is None:
+        return None
+
+    if not isinstance(restart_transition, dict):
+        return float(baseline_ms)
+
+    previous_partition = _partition_config_from_payload(restart_transition.get("previous_partition"))
+    current_partition = getattr(failover_optimizer, "current_partition", None)
+    if previous_partition is None or current_partition is None:
+        return float(baseline_ms)
+
+    previous_nominal = restart_transition.get("previous_nominal_step_time")
+    if previous_nominal is None:
+        try:
+            previous_nominal = failover_optimizer.estimate_partition_nominal_step_time(previous_partition)
+        except Exception:
+            previous_nominal = None
+
+    new_nominal = restart_transition.get("new_nominal_step_time")
+    if new_nominal is None:
+        try:
+            new_nominal = failover_optimizer.estimate_partition_nominal_step_time(current_partition)
+        except Exception:
+            new_nominal = None
+
+    try:
+        previous_nominal = float(previous_nominal)
+        new_nominal = float(new_nominal)
+    except (TypeError, ValueError):
+        return float(baseline_ms)
+
+    if previous_nominal <= 0 or not np.isfinite(previous_nominal):
+        return float(baseline_ms)
+    if new_nominal <= 0 or not np.isfinite(new_nominal):
+        return float(baseline_ms)
+
+    scaled = float(baseline_ms) * (new_nominal / previous_nominal)
+    if not np.isfinite(scaled) or scaled <= 0:
+        return float(baseline_ms)
+    return scaled
+
+
+def _restore_post_restart_monitoring(
+    slowdown_detector: Optional[SlowdownDetector],
+    failover_optimizer: Optional[MathematicalFailoverOptimizer],
+    detector_state: Optional[Dict[str, Any]],
+    optimizer_state: Optional[Dict[str, Any]],
+    restart_transition: Optional[Dict[str, Any]],
+) -> None:
+    if failover_optimizer is not None and isinstance(optimizer_state, dict):
+        failover_optimizer.restore_restart_state(optimizer_state)
+
+    if slowdown_detector is None or not isinstance(detector_state, dict):
+        return
+
+    slowdown_detector.restore_restart_state(
+        detector_state,
+        clear_recent_window=True,
+        clear_trigger_state=True,
+    )
+    adjusted_baseline_ms = _estimate_restart_detector_baseline_ms(
+        failover_optimizer,
+        detector_state,
+        restart_transition,
+    )
+    if adjusted_baseline_ms is not None:
+        baseline_std_ms = detector_state.get("baseline_std_ms")
+        slowdown_detector.set_baseline(
+            baseline_stage_time_ms=adjusted_baseline_ms,
+            baseline_std_ms=0.0 if baseline_std_ms is None else float(baseline_std_ms),
+            clear_recent_window=True,
+            clear_trigger_state=True,
+        )
+        logging.info(
+            "🧭 Post-restart wall-clock baseline adjusted for new partition: "
+            f"{adjusted_baseline_ms:.2f}ms"
+        )
+
+
+def _get_post_restart_observation_steps(
+    restart_payload: Optional[Dict[str, Any]],
+    slowdown_detector: Optional[SlowdownDetector],
+) -> int:
+    env_steps = os.environ.get("FAILOVER_POST_RESTART_OBSERVATION_STEPS", "").strip()
+    if env_steps:
+        try:
+            return max(0, int(env_steps))
+        except ValueError:
+            pass
+
+    if isinstance(restart_payload, dict):
+        payload_steps = restart_payload.get("post_restart_observation_steps")
+        if payload_steps is not None:
+            try:
+                return max(0, int(payload_steps))
+            except (TypeError, ValueError):
+                pass
+
+    detector_steps = 0 if slowdown_detector is None else int(getattr(slowdown_detector, "detection_window", 0) or 0)
+    return max(5, detector_steps * 2 if detector_steps > 0 else 10)
 
 def _run_dryrun_failover_cycle():
     """Deterministic one-cycle failover dry-run for E2E launcher validation."""
@@ -916,10 +1124,16 @@ def main():
     # failover_optimizer.
     bootstrap_alpha_comp = bootstrap["alpha_comp"]
     bootstrap_beta_comm = bootstrap["beta_comm"]
+    bootstrap_restart_payload = bootstrap.get("restart_payload")
+    bootstrap_restart_transition = bootstrap.get("restart_transition")
+    bootstrap_detector_state = bootstrap.get("slowdown_detector_state")
+    bootstrap_optimizer_state = bootstrap.get("optimizer_runtime_state")
     niter = int(bootstrap["resume_step"])
     start_epoch = int(bootstrap["resume_epoch"])
     _resume_target_epoch = start_epoch
     _resume_batches_to_skip = int(bootstrap["resume_batch_offset"])
+
+    _configure_environment_injected_slowdown(total_steps=len(train_loader) * max(1, args.epochs))
 
     # initialize tspipe (if needed)
     slowdown_detector = None  # NEW: Initialize slowdown detector
@@ -954,6 +1168,10 @@ def main():
             skip_partition_yaml_apply=True,
             skip_checkpoint_restore=True,
         )
+        bootstrap_restart_payload = bootstrap.get("restart_payload") or bootstrap_restart_payload
+        bootstrap_restart_transition = bootstrap.get("restart_transition") or bootstrap_restart_transition
+        bootstrap_detector_state = bootstrap.get("slowdown_detector_state") or bootstrap_detector_state
+        bootstrap_optimizer_state = bootstrap.get("optimizer_runtime_state") or bootstrap_optimizer_state
         niter = int(bootstrap["resume_step"])
         start_epoch = int(bootstrap["resume_epoch"])
         _resume_target_epoch = start_epoch
@@ -1012,6 +1230,13 @@ def main():
         # reapply previously restored alpha/beta coefficients.
         if failover_optimizer is not None and bootstrap["partition"] is not None:
             failover_optimizer.current_partition = bootstrap["partition"]
+            _restore_post_restart_monitoring(
+                slowdown_detector=slowdown_detector,
+                failover_optimizer=failover_optimizer,
+                detector_state=bootstrap_detector_state,
+                optimizer_state=bootstrap_optimizer_state,
+                restart_transition=bootstrap_restart_transition,
+            )
 
             # ✅ Restore alpha/beta coefficients captured from the first
             # bootstrap call (which read them from the checkpoint or
@@ -1045,12 +1270,26 @@ def main():
 
         def _save_failover_checkpoint(meta):
             checkpoint_path = os.path.join(args.save_root, 'failover_checkpoint_latest.pth')
+            detector_restart_state = None
+            if slowdown_detector is not None and hasattr(slowdown_detector, 'export_restart_state'):
+                detector_restart_state = slowdown_detector.export_restart_state()
+                meta['slowdown_detector_state'] = detector_restart_state
+
+            optimizer_restart_state = None
+            if failover_optimizer is not None and hasattr(failover_optimizer, 'export_restart_state'):
+                optimizer_restart_state = failover_optimizer.export_restart_state()
+                meta['optimizer_runtime_state'] = optimizer_restart_state
+
+            meta.setdefault('post_restart_observation_steps', _get_post_restart_observation_steps(None, slowdown_detector))
+
             state = {
                 'global_step': niter,
                 'policy': meta.get('trigger_policy'),
                 'partition': meta.get('partition'),
                 'alpha_comp': meta.get('alpha_comp'),
                 'beta_comm': meta.get('beta_comm'),
+                'slowdown_detector_state': detector_restart_state,
+                'optimizer_runtime_state': optimizer_restart_state,
                 'student_state_dict': snet.state_dict(),
                 'teacher_state_dict': tnet.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
@@ -1072,9 +1311,20 @@ def main():
         snet = snet.cuda()
         tnet = tnet.cuda()  
 
+    post_restart_observation_steps = 0
+    failover_resume_gate_step = niter
     if bootstrap["enabled"]:
+        post_restart_observation_steps = _get_post_restart_observation_steps(
+            bootstrap_restart_payload,
+            slowdown_detector,
+        )
+        failover_resume_gate_step = niter + post_restart_observation_steps
         logging.error(
             f"Failover recovery successful. Resuming training from step [{niter}] with new partition."
+        )
+        logging.info(
+            "🕒 Post-restart observation window enabled: "
+            f"{post_restart_observation_steps} steps (policy reevaluation resumes at step {failover_resume_gate_step})"
         )
 
     writer = SummaryWriter()
@@ -1106,6 +1356,7 @@ def main():
                          slowdown_detector=slowdown_detector,
                          failover_optimizer=failover_optimizer,
                          timing_ingestor=timing_ingestor,
+                         failover_resume_gate_step=failover_resume_gate_step,
                          max_steps_per_epoch=args.max_steps_per_epoch)
         else:
             train(train_loader, nets, optimizer, criterions, epoch, writer)
@@ -1378,6 +1629,7 @@ def tspipe_loss(model_out: torch.Tensor, ema_model_out: torch.Tensor, label: tor
 niter = 0
 def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterions, epoch, writer,
                  slowdown_detector=None, failover_optimizer=None, timing_ingestor=None,
+                 failover_resume_gate_step: int = 0,
                  max_steps_per_epoch: int = 0):
     global niter
 
@@ -1466,7 +1718,13 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                 }
 
         # 5) periodic failover evaluation
-        if failover_optimizer is not None and slowdown_detector is not None and niter % 10 == 0:
+        failover_gate_active = int(niter) < int(failover_resume_gate_step or 0)
+        if (
+            failover_optimizer is not None
+            and slowdown_detector is not None
+            and niter % 10 == 0
+            and not failover_gate_active
+        ):
             wall_ratio = float(trigger_state["current_slowdown_ratio"]) if trigger_state else 1.0
             wall_sustained = float(trigger_state["sustained_duration_sec"]) if trigger_state else 0.0
             wall_triggered = bool(trigger_state["triggered"]) if trigger_state else False
@@ -1531,6 +1789,12 @@ def train_tspipe(tspipe_trainer:TSPipe, train_loader, nets, optimizer, criterion
                         f"ratio={wall_ratio:.2f}x, sustained={wall_sustained:.1f}s/"
                         f"{wallclock_sustain_sec:.1f}s, step={niter}"
                     )
+        elif failover_gate_active and niter % 10 == 0:
+            remaining_gate = int(failover_resume_gate_step) - int(niter)
+            logging.info(
+                "🕒 Post-restart observation active: "
+                f"{max(0, remaining_gate)} steps until failover reevaluation resumes (step={niter})"
+            )
 
         writer.add_scalar('loss', loss, global_step=niter)
         pbar.set_postfix({'loss': loss, 'batch_id': niter})

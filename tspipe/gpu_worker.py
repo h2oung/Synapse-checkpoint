@@ -400,6 +400,7 @@ class GpuWorker(BaseWorker):
         self.slowdown_duration_sec: Optional[float] = None
         self.slowdown_task_scope: str = "compute"
         self._slowdown_wallclock_anchor_sec: Optional[float] = None
+        self._slowdown_batch_start_sec: Dict[int, float] = {}
 
         # Per-task baseline runtime (ms), learned outside slowdown window
         self._task_baseline_ms: Dict[str, float] = {}
@@ -469,6 +470,7 @@ class GpuWorker(BaseWorker):
         self.slowdown_duration_sec = _opt(arg_src, "slowdown_duration_sec", None)
         self.resume_step_offset = int(_opt(arg_src, "resume_step_offset", 0) or 0)
         self.slowdown_task_scope = _opt(arg_src, "slowdown_task_scope", "compute")
+        self.failover_inject_scenario = str(_opt(arg_src, "failover_inject_scenario", "") or "").strip().lower()
         if self.slowdown_task_scope is None:
             self.slowdown_task_scope = "compute"
         self.slowdown_task_scope = str(self.slowdown_task_scope).strip().lower()
@@ -492,7 +494,7 @@ class GpuWorker(BaseWorker):
             f"device_id={self.device_id}, target_gpu={self.slowdown_gpu}, "
             f"mode={self.slowdown_mode}, factor={self.slowdown_factor}, fixed_ms={self.slowdown_fixed_ms}, {window_desc}, "
             f"scope={self.slowdown_task_scope}, resume_step_offset={self.resume_step_offset}, "
-            f"arg_src={type(arg_src).__name__}"
+            f"scenario={self.failover_inject_scenario}, arg_src={type(arg_src).__name__}"
         )       
         Log.d("Received args, args = ", self.args)
         Log.d("Received config, args = ", self.config)
@@ -837,6 +839,20 @@ class GpuWorker(BaseWorker):
             return False
         return int(self.device_id) == int(self.slowdown_gpu)
 
+    def _slowdown_step_key(self, task: 'GpuTask') -> int:
+        return int(self._task_global_step(task))
+
+    def _record_slowdown_batch_start(self, task: 'GpuTask') -> float:
+        batch_key = self._slowdown_step_key(task)
+        start_sec = self._slowdown_batch_start_sec.get(batch_key)
+        if start_sec is None:
+            start_sec = monotonic()
+            self._slowdown_batch_start_sec[batch_key] = start_sec
+        return start_sec
+
+    def _consume_slowdown_batch_start(self, task: 'GpuTask') -> Optional[float]:
+        return self._slowdown_batch_start_sec.pop(self._slowdown_step_key(task), None)
+
     def _task_local_step(self, task: 'GpuTask') -> int:
         return max(0, int(task.batch_id) - 1)
 
@@ -964,6 +980,40 @@ class GpuWorker(BaseWorker):
 
     def get_task_injected_sleep_sec(self, task: 'GpuTask') -> float:
         setattr(task, "_worker_slowdown_injection_applied", False)
+
+        if self.failover_inject_scenario == "slowdown":
+            if not self.should_inject_task_slowdown(task):
+                return 0.0
+
+            # Warm-up interval 동안은 기준 시각만 기록하고 실제 sleep은 하지 않는다.
+            self._record_slowdown_batch_start(task)
+
+            if task.task_type != TaskType.TASK_COMPUTE_OPTIMIZE_GPU:
+                return 0.0
+
+            ratio = float(self.slowdown_factor or 1.0)
+            if ratio <= 1.0:
+                self._log_slowdown_skip(task, "non_positive_ratio", f"ratio={ratio}")
+                self._consume_slowdown_batch_start(task)
+                return 0.0
+
+            try:
+                torch.cuda.synchronize()
+            except Exception:
+                pass
+
+            start_sec = self._consume_slowdown_batch_start(task)
+            if start_sec is None:
+                start_sec = monotonic()
+
+            elapsed_sec = max(monotonic() - start_sec, 0.0)
+            extra_sec = max(elapsed_sec * (ratio - 1.0), 0.0)
+            if extra_sec <= 0.0:
+                return 0.0
+
+            setattr(task, "_worker_slowdown_injection_applied", True)
+            return extra_sec
+
         if not self.should_inject_task_slowdown(task):
             return 0.0
 
@@ -1029,20 +1079,14 @@ class GpuWorker(BaseWorker):
 
     def log_task_slowdown_injection(self, task: 'GpuTask', sleep_sec: float):
         self._slowdown_inject_count += 1
-        if self._slowdown_inject_count % self._slowdown_log_every != 0:
+        if self.failover_inject_scenario != "slowdown" and self._slowdown_inject_count % self._slowdown_log_every != 0:
             return
 
-        scope = self._task_scope_of(task)
-        key = self._task_baseline_key(task)
-        baseline_ms = self._task_baseline_ms.get(key, -1.0) if key else -1.0
-        window_state = self._capture_task_slowdown_window_state(task)
-
         Log.i(
-            f"🧪 [WorkerSlowdown] partition={self.partition_id}, device_id={self.device_id}, "
-            f"task={task.task_type.name}, scope={scope}, batch={task.batch_id}, "
+            f"[Injected Delay] GPU {self.device_id}: Sleeping {sleep_sec:.2f}s "
+            f"(partition={self.partition_id}, task={task.task_type.name}, batch={task.batch_id}, "
             f"local_step={self._task_local_step(task)}, global_step={self._task_global_step(task)}, "
-            f"mode={self.slowdown_mode}, baseline_ms={baseline_ms:.2f}, factor={self.slowdown_factor}, fixed_ms={self.slowdown_fixed_ms}, "
-            f"window={window_state.get('label')}, sleep_ms={sleep_sec * 1000.0:.2f}"
+            f"ratio={self.slowdown_factor}, scenario={self.failover_inject_scenario})"
         )
     def join(self):
         # 헬스체크 중지

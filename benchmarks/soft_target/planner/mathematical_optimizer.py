@@ -13,6 +13,7 @@ import time
 import json
 import os
 import logging
+from copy import deepcopy
 from typing import Any, Callable, Dict, List, Optional
 
 # Configure logging
@@ -125,6 +126,7 @@ class MathematicalFailoverOptimizer:
         self._auto_restart_on_failover = False
         self._checkpoint_saver: Optional[Callable[[Dict[str, Any]], Optional[str]]] = None
         self._restart_config_path = os.path.join(os.getcwd(), "restart_config.json")
+        self._pending_restart_transition: Optional[Dict[str, Any]] = None
 
         # ETA breakdown debug log (JSONL)
         self._eta_debug_log_path = os.path.join(
@@ -165,6 +167,107 @@ class MathematicalFailoverOptimizer:
             start = end
         return boundaries
 
+    def _partition_to_payload(self, partition: Optional[PartitionConfig]) -> Optional[Dict[str, Any]]:
+        if partition is None:
+            return None
+        return {
+            "gpu_assignment": [int(g) for g in partition.gpu_assignment],
+            "snet_partition": [int(v) for v in partition.snet_partition],
+            "tnet_partition": [int(v) for v in partition.tnet_partition],
+            "snet_stage_boundaries": self._partition_boundaries(partition.snet_partition),
+            "tnet_stage_boundaries": self._partition_boundaries(partition.tnet_partition),
+        }
+
+    def estimate_partition_nominal_step_time(self, partition: Optional[PartitionConfig]) -> float:
+        """Estimate partition bottleneck under neutral (healthy) GPU coefficients."""
+        if partition is None:
+            return float("inf")
+        neutral_alpha = {int(g): 1.0 for g in partition.gpu_assignment}
+        neutral_beta = {int(g): 1.0 for g in partition.gpu_assignment}
+        return float(
+            self._runtime_stage_time_predictor.calculate_partition_bottleneck_time(
+                partition,
+                neutral_alpha,
+                neutral_beta,
+            )
+        )
+
+    def export_restart_state(self) -> Dict[str, Any]:
+        """Serialize optimizer runtime baseline state for failover restart."""
+        state: Dict[str, Any] = {
+            "baseline_warmup_steps": int(self.baseline_warmup_steps),
+            "baseline_frozen": bool(self._baseline_frozen),
+            "baseline_count_compute": {
+                int(k): int(v) for k, v in self._baseline_count_compute.items()
+            },
+            "baseline_count_comm": {
+                int(k): int(v) for k, v in self._baseline_count_comm.items()
+            },
+            "baseline_compute_time": {
+                int(k): float(v) for k, v in self._baseline_compute_time.items()
+            },
+            "baseline_comm_time": {
+                int(k): float(v) for k, v in self._baseline_comm_time.items()
+            },
+            "latest_compute_time": {
+                int(k): float(v) for k, v in self._latest_compute_time.items()
+            },
+            "latest_comm_time": {
+                int(k): float(v) for k, v in self._latest_comm_time.items()
+            },
+            "suspect_gpu_id": None if self._suspect_gpu_id is None else int(self._suspect_gpu_id),
+            "suspect_switch_counter": int(self._suspect_switch_counter),
+        }
+        if self.use_mathematical_model:
+            state["progress_step"] = int(self.progress_tracker.progress.current_step)
+            state["progress_epoch"] = int(self.progress_tracker.progress.current_epoch)
+        return state
+
+    def restore_restart_state(self, state: Optional[Dict[str, Any]]) -> bool:
+        """Restore optimizer baseline/runtime state after failover restart."""
+        if not isinstance(state, dict):
+            return False
+
+        self.baseline_warmup_steps = max(
+            1,
+            int(state.get("baseline_warmup_steps", self.baseline_warmup_steps) or self.baseline_warmup_steps),
+        )
+        self._baseline_frozen = bool(state.get("baseline_frozen", self._baseline_frozen))
+        self._baseline_count_compute = {
+            int(k): int(v) for k, v in (state.get("baseline_count_compute") or {}).items()
+        }
+        self._baseline_count_comm = {
+            int(k): int(v) for k, v in (state.get("baseline_count_comm") or {}).items()
+        }
+        self._baseline_compute_time = {
+            int(k): float(v) for k, v in (state.get("baseline_compute_time") or {}).items()
+        }
+        self._baseline_comm_time = {
+            int(k): float(v) for k, v in (state.get("baseline_comm_time") or {}).items()
+        }
+        self._latest_compute_time = {
+            int(k): float(v) for k, v in (state.get("latest_compute_time") or {}).items()
+        }
+        self._latest_comm_time = {
+            int(k): float(v) for k, v in (state.get("latest_comm_time") or {}).items()
+        }
+        suspect_gpu = state.get("suspect_gpu_id")
+        self._suspect_gpu_id = None if suspect_gpu is None else int(suspect_gpu)
+        self._suspect_switch_counter = int(state.get("suspect_switch_counter", 0) or 0)
+
+        if self.use_mathematical_model:
+            progress_step = int(state.get("progress_step", self.progress_tracker.progress.current_step) or 0)
+            progress_epoch = int(state.get("progress_epoch", self.progress_tracker.progress.current_epoch) or 0)
+            self.progress_tracker.update_step(progress_step, progress_epoch)
+            if self._baseline_frozen:
+                self._refresh_restart_cost_model()
+
+        self.logger.info(
+            "✅ Restored optimizer baseline state from checkpoint "
+            f"(baseline_frozen={self._baseline_frozen}, compute_gpus={sorted(self._baseline_compute_time.keys())})"
+        )
+        return True
+
     def _build_restart_payload(self, policy: str) -> Dict[str, Any]:
         """Build restart config payload from the latest partition/coefficient state."""
         step_id = 0
@@ -194,13 +297,7 @@ class MathematicalFailoverOptimizer:
             "timestamp": time.time(),
             "trigger_policy": str(policy),
             "step_id": step_id,
-            "partition": {
-                "gpu_assignment": active_gpus,
-                "snet_partition": [int(v) for v in self.current_partition.snet_partition],
-                "tnet_partition": [int(v) for v in self.current_partition.tnet_partition],
-                "snet_stage_boundaries": self._partition_boundaries(self.current_partition.snet_partition),
-                "tnet_stage_boundaries": self._partition_boundaries(self.current_partition.tnet_partition),
-            },
+            "partition": self._partition_to_payload(self.current_partition),
             "alpha_comp": alpha_to_save,
             "beta_comm": beta_to_save,
             "restart_overhead": {
@@ -209,6 +306,8 @@ class MathematicalFailoverOptimizer:
                 "value": float(c_load + d_replan + r_replan * t_base),
             },
         }
+        if self._pending_restart_transition is not None:
+            payload["partition_transition"] = deepcopy(self._pending_restart_transition)
         return payload
 
     def _write_restart_config(self, payload: Dict[str, Any]):
@@ -249,6 +348,7 @@ class MathematicalFailoverOptimizer:
 
         payload["checkpoint_path"] = str(checkpoint_path)
         self._write_restart_config(payload)
+        self._pending_restart_transition = None
 
         # Step 3: Exit for external process supervisor restart.
         self.logger.error(
@@ -660,6 +760,7 @@ class MathematicalFailoverOptimizer:
         """REPLAN 정책 실행"""
         self.logger.info(f"🔄 Executing REPLAN for GPU {gpu_id} (slowdown: {slowdown:.2f})")
 
+        previous_partition = deepcopy(self.current_partition)
         active_gpus = list(self.current_partition.gpu_assignment)
         new_partition = self.replan_optimizer(
             "tnet.csv",
@@ -669,6 +770,12 @@ class MathematicalFailoverOptimizer:
             gpu_assignment=active_gpus,
         )
         if new_partition is not None:
+            self._pending_restart_transition = {
+                "policy": "REPLAN",
+                "previous_partition": self._partition_to_payload(previous_partition),
+                "previous_nominal_step_time": self.estimate_partition_nominal_step_time(previous_partition),
+                "new_nominal_step_time": self.estimate_partition_nominal_step_time(new_partition),
+            }
             self.current_partition = new_partition
             self.logger.info(f"🔁 REPLAN applied new partition: {self.current_partition}")
             self._trigger_failover_restart("REPLAN")
@@ -679,6 +786,7 @@ class MathematicalFailoverOptimizer:
         """DEGRADE 정책 실행"""
         self.logger.info(f"⬇️ Executing DEGRADE by excluding GPU {gpu_id} (slowdown: {slowdown:.2f})")
 
+        previous_partition = deepcopy(self.current_partition)
         active_gpus = [g for g in self.current_partition.gpu_assignment if g != gpu_id]
         if not active_gpus:
             self.logger.warning("DEGRADE skipped: no active GPU remains after exclusion")
@@ -689,6 +797,12 @@ class MathematicalFailoverOptimizer:
             self.logger.warning("DEGRADE failed to produce a valid DP partition")
             return
 
+        self._pending_restart_transition = {
+            "policy": "DEGRADE",
+            "previous_partition": self._partition_to_payload(previous_partition),
+            "previous_nominal_step_time": self.estimate_partition_nominal_step_time(previous_partition),
+            "new_nominal_step_time": self.estimate_partition_nominal_step_time(new_partition),
+        }
         self.current_partition = new_partition
         self.logger.info(f"⬇️ DEGRADE applied new partition: {self.current_partition}")
         self._trigger_failover_restart("DEGRADE")

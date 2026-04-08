@@ -94,6 +94,10 @@ def maybe_inject_worker_slowdown(ctx: 'GpuTaskContext', task: 'GpuTask'):
     if sleep_sec <= 0:
         return
 
+    try:
+        torch.cuda.synchronize()
+    except Exception:
+        pass
     time.sleep(sleep_sec)
     _acc_profile_extra(ctx, "injected_sleep_ms", sleep_sec * 1000.0)
     worker.log_task_slowdown_injection(task, sleep_sec)
