@@ -60,6 +60,7 @@ coverage.xml
 
 # Django stuff:
 *.log
+!e2e_summary.log
 local_settings.py
 db.sqlite3
 

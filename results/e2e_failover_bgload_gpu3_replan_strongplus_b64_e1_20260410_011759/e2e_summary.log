@@ -1,0 +1,6 @@
+[E2E] Run note: e2e_failover_bgload_gpu3_replan_strongplus_b64_e1_20260410_011759
+[E2E] Run dir: ./results/e2e_failover_bgload_gpu3_replan_strongplus_b64_e1_20260410_011759
+[E2E] Status: RUNNING
+[E2E] Restart count: 0
+[E2E] Start time: 2026-04-10 01:18:00
+[E2E] Summary file initialized; final wall-clock will be written on exit.
